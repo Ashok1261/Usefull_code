@@ -1,14 +1,1 @@
-try:
-    return EvaluationResponse(
-        strategyId=strategy.id,
-        strategyName=strategy.name,
-        description=strategy.description,
-        strategyConfig=EvalConfig(**strategy.config),
-        createdBy=strategy.created_by,
-        modifiedBy=strategy.modified_by,
-        createdTs=strategy.created_ts,
-        modifiedTs=strategy.modified_ts
-    )
-except Exception as e:
-    logger.error(f"Error fetching Evaluation Strategy: {e}")
-    raise Exception(str(e))
+
