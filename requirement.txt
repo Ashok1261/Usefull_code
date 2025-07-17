@@ -1,1 +1,6 @@
 
+import sys
+import os
+
+sys.path.append(os.path.abspath("promptflow/evaluation_flow"))
+from judge_component import evaluate
