@@ -1,2 +1,1 @@
-"strategyConfig": EvalConfig(**i.config[0]) if isinstance(i.config, list) and len(i.config) > 0 else {},
 
