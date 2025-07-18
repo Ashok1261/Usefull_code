@@ -1,1 +1,126 @@
+# Folder Structure for Evaluation Flow
 
+```
+evaluation-flow/
+├── .promptflow/
+├── methods/
+│   ├── judge_component.py
+│   ├── load_file_blob_service.py
+│   └── ssrai_service.py
+├── resource/
+│   ├── config_predev.cfg
+│   └── ssrai_config.cfg
+├── convert_pdf_to_image.py
+├── file_extracts_from_images.py
+├── flow.dag.yaml
+├── flow.tools.json
+├── load_file_blob.py
+├── llm_as_judge.py
+├── requirements.txt
+```
+
+> This structure follows the same pattern as `data-curation-flow-original-qa-generation-v1`.
+
+### ✅ flow.tools.json
+```json
+{
+  "tools": [
+    {
+      "name": "llm_as_judge",
+      "type": "python",
+      "path": "llm_as_judge.py",
+      "description": "LLM-based evaluator that compares generated answers with ground truth answers and scores them using SSRAIClient and judge_component."
+    },
+    {
+      "name": "load_file_blob",
+      "type": "python",
+      "path": "load_file_blob.py",
+      "description": "Loads input files from Azure Blob Storage."
+    },
+    {
+      "name": "convert_pdf_to_image",
+      "type": "python",
+      "path": "convert_pdf_to_image.py",
+      "description": "Converts uploaded PDF documents to images for OCR-based extraction."
+    },
+    {
+      "name": "file_extracts_from_images",
+      "type": "python",
+      "path": "file_extracts_from_images.py",
+      "description": "Extracts content from images converted from PDF pages."
+    }
+  ]
+}
+```
+
+### ✅ flow.dag.yaml
+```yaml
+environment:
+  $schema: https://azuremlschemas.azureedge.net/promptflow/latest/Flow.schema.json
+  python_requirements_txt: requirements.txt
+
+inputs:
+  blob_container:
+    type: string
+    default: pvt-markets
+
+  blob_path:
+    type: string
+    default: fts-data/test_sop_folder
+
+  rai_model_name:
+    type: string
+    default: ""
+
+  rai_wrapper_name:
+    type: string
+    default: ""
+
+  score_prompt:
+    type: string
+    default: ""
+
+outputs:
+  response:
+    type: string
+    reference: ${llm_as_judge.output}
+
+nodes:
+  - name: loading_blob_file
+    type: python
+    source:
+      type: code
+      path: load_file_blob.py
+    inputs:
+      blobPath: $(inputs.blob_path)
+      blobContainer: $(inputs.blob_container)
+
+  - name: convert_pdf_pages_to_image
+    type: python
+    source:
+      type: code
+      path: convert_pdf_to_image.py
+    inputs:
+      fileData: ${loading_blob_file.output}
+
+  - name: file_extracts_from_images
+    type: python
+    source:
+      type: code
+      path: file_extracts_from_images.py
+    inputs:
+      imageData: ${convert_pdf_pages_to_image.output}
+
+  - name: llm_as_judge
+    type: python
+    source:
+      type: code
+      path: llm_as_judge.py
+    inputs:
+      extracted_content: ${file_extracts_from_images.output}
+      rai_model_name: $(inputs.rai_model_name)
+      rai_wrapper_name: $(inputs.rai_wrapper_name)
+      score_prompt: $(inputs.score_prompt)
+```
+
+Let me know when you're ready for the zipped version.
