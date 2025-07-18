@@ -1,1 +1,142 @@
+import os
+import json
+import pandas as pd
+from ast import literal_eval
+from typing import Dict, Any
+from promptflow import tool
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain_openai.chat_models import AzureChatOpenAI
+from ssrai import SSRAIClient
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from rouge_score import rouge_scorer
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Prompt template for LLM scoring
+SCORE_PROMPT = """You are an expert evaluator tasked with assessing the generated_answer compared to ground_truth_answer.
+
+Input data: {input_data}
+
+Understand the criteria for the 2 metrics and generate individual scores:
+
+1. Accuracy: Are all statements in the generated_answer consistent with the ground_truth_answer?
+2. Completeness: Does the generated_answer capture all key facts from the ground_truth_answer?
+
+Ignore additional/unrelated points or image references.
+
+# Output JSON format ONLY:
+[{{"accuracy_score": x, "accuracy_explanation": "...", "completeness_score": y, "completeness_explanation": "..."}}]
+"""
+
+@tool
+def compute_metrics(gndth_ans: str, llm_answer: str) -> Dict[str, float]:
+    smoothie = SmoothingFunction().method4
+    bleu_score = sentence_bleu([gndth_ans.split()], llm_answer.split(), smoothing_function=smoothie)
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rouge_scores = scorer.score(gndth_ans, llm_answer)
+    rougel_f1 = rouge_scores['rougeL'].fmeasure
+    return {"BLEU": bleu_score, "ROUGE-L": rougel_f1}
+
+@tool
+def llm_as_judge(input_data: str, model_name: str, host: str, key: str, secret: str, client_id: str) -> Any:
+    try:
+        ssc_rai_client = SSRAIClient(
+            host=host,
+            eam_consumer_key=key,
+            eam_consumer_secret=secret,
+            auth_type="pat",
+            rai_client_id=client_id,
+            api_version="1.0"
+        )
+
+        llm = ssc_rai_client.llm(wrapper="langchain", model_name=model_name)
+        prompt = PromptTemplate.from_template(SCORE_PROMPT)
+        llm_chain = LLMChain(llm=llm, prompt=prompt)
+
+        result = llm_chain.predict(input_data=input_data)
+        return literal_eval(result)
+    except Exception as e:
+        return {"error": str(e)}
+
+@tool
+def question_typewise_accur(df: pd.DataFrame) -> pd.DataFrame:
+    fil_lst = ['Conceptual', 'Reasoning-Based', 'Inferential', 'Factual', 'Procedural']
+    fil_dic = {}
+    for fil in fil_lst:
+        fil_df = df[df["Question Type"] == fil]
+        fil_dic[fil + "_cnt"] = fil_df['business_comparison_score'].count()
+        fil_dic[fil + "_mean"] = round(fil_df['business_comparison_score'].mean(), 2)
+    df.reset_index(inplace=True)
+    df["type_wise_overall_bussiness"] = None
+    df["type_wise_overall_bussiness"] = df["type_wise_overall_bussiness"].astype(object)
+    df.at[0, "type_wise_overall_bussiness"] = fil_dic
+    return df
+
+@tool
+def get_mean(df_acc: pd.DataFrame, cols: list) -> pd.DataFrame:
+    for col in cols:
+        try:
+            df_acc["overall_" + col] = None
+            df_acc.loc[0, "overall_" + col] = df_acc[col].mean()
+        except Exception as e:
+            print(f"Failed to create mean for {col}: {str(e)}")
+    return df_acc
+
+@tool
+def compute_scores_for_df(df_path: str, output_path: str,
+                          model_name: str, host: str, key: str, secret: str, client_id: str) -> str:
+    df = pd.read_csv(df_path)
+    formatted_output = []
+
+    for index, row in df.iterrows():
+        input_data = f"""# {index}
+## question: {row['Question']}
+## ground_truth_answer: {row['Answer']}
+## generated_answer: {row['finetuned_response']}"""
+
+        try:
+            result = llm_as_judge(
+                input_data=input_data,
+                model_name=model_name,
+                host=host,
+                key=key,
+                secret=secret,
+                client_id=client_id
+            )
+
+            if result and isinstance(result, list):
+                result_obj = result[0]
+                formatted_output.append({
+                    "business_comparison_score": round((result_obj['accuracy_score'] + result_obj['completeness_score']) / 2, 2),
+                    **result_obj
+                })
+            else:
+                formatted_output.append({
+                    "business_comparison_score": None,
+                    "accuracy_score": None,
+                    "accuracy_explanation": "LLM response missing",
+                    "completeness_score": None,
+                    "completeness_explanation": "LLM response missing"
+                })
+
+        except Exception as e:
+            formatted_output.append({
+                "business_comparison_score": None,
+                "accuracy_score": None,
+                "accuracy_explanation": f"Error: {str(e)}",
+                "completeness_score": None,
+                "completeness_explanation": f"Error: {str(e)}"
+            })
+
+    df_scores = pd.DataFrame(formatted_output)
+    df_final = pd.concat([df, df_scores], axis=1)
+
+    # Add type-wise and mean scores
+    df_final = question_typewise_accur(df_final)
+    df_final = get_mean(df_final, ["business_comparison_score", "accuracy_score", "completeness_score"])
+
+    df_final.to_excel(output_path, index=False)
+    return output_path
 
