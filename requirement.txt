@@ -1,3 +1,17 @@
+
+Implemented Evaluation Metrics Management APIs
+
+Create API – To save new evaluation strategies and configurations
+
+Update API – To modify existing evaluation metric strategies
+
+Delete API – To remove unwanted or obsolete evaluation strategies
+
+Download API – To export evaluation metric results or strategies
+
+Trigger API – To initiate evaluation metrics execution using defined strategy and ECS ID
+
+
 import sys
 import os
 
