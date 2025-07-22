@@ -1,3 +1,1 @@
-evalstrategyConfig=EvalConfig(**i.config)
-            if isinstance(i.config, dict) and "static" in i.config and "dynamic" in i.config
-            else {},
+
