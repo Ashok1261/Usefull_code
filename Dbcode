@@ -2,11 +2,24 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 import re
 
-# === Step 1: Read your CSV file ===
-file_path = 'C:/Users/yezarla.ashok/Desktop/coding/data.csv'  # 🔁 Update path if needed
+# === Step 1: Load CSV and fix date columns ===
+file_path = 'C:/Users/yezarla.ashok/Desktop/coding/data.csv'  # 🔁 Update as needed
 df = pd.read_csv(file_path)
 
-# === Step 2: PostgreSQL connection settings ===
+# === Step 2: Fix date format columns ===
+def fix_date_columns(df):
+    for col in df.columns:
+        if 'date' in col.lower():
+            try:
+                df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+                print(f"📅 Converted column '{col}' to datetime format.")
+            except Exception as e:
+                print(f"⚠️ Failed to convert column '{col}' to datetime: {e}")
+    return df
+
+df = fix_date_columns(df)
+
+# === Step 3: PostgreSQL connection ===
 username = ''
 password = ''
 host = ''
@@ -14,12 +27,11 @@ port = ''
 database = ''
 table_name = ''
 
-# Create DB connection URL and engine
 db_url = f'postgresql://{username}:{password}@{host}:{port}/{database}'
 engine = create_engine(db_url)
 
 
-# === Step 3: Expand column length in PostgreSQL ===
+# === Step 4: Expand a specific column dynamically ===
 def expand_column(engine, table_name, column_name, new_type="VARCHAR(1000)"):
     try:
         with engine.connect() as conn:
@@ -30,7 +42,7 @@ def expand_column(engine, table_name, column_name, new_type="VARCHAR(1000)"):
         print(f"❌ Failed to alter column {column_name}: {e}")
 
 
-# === Step 4: Insert and retry after column expansion ===
+# === Step 5: Insert with auto column expand retry ===
 def insert_with_auto_expand():
     try:
         df.to_sql(table_name, engine, if_exists='append', index=False)
@@ -38,19 +50,21 @@ def insert_with_auto_expand():
     except Exception as e:
         msg = str(e)
 
-        # Detect string truncation error
+        # Check for string length truncation issue
         if "value too long for type character varying" in msg:
             match = re.search(r'column "([^"]+)"', msg)
             if match:
                 column_name = match.group(1)
-                print(f"⚠️ Column '{column_name}' caused the issue. Attempting to expand...")
+                print(f"⚠️ Column '{column_name}' caused length error. Expanding it...")
                 expand_column(engine, table_name, column_name)
-                insert_with_auto_expand()  # 🔁 Retry
+                insert_with_auto_expand()  # Retry after fix
             else:
-                print("❌ Couldn't identify column name in the error message.")
+                print("❌ Column name not found in error.")
+        elif "DatetimeFieldOverflow" in msg:
+            print("❌ Date field error! Please ensure all dates are valid and not out of range.")
         else:
             print(f"❌ Other error: {e}")
 
 
-# === Step 5: Start the process ===
+# === Step 6: Execute the process ===
 insert_with_auto_expand()
