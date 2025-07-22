@@ -1,3 +1,48 @@
+import logging
+from fts_commons.models.evaluation_models import EvalConfig
+from fts_mgmt.models.response_models import EvaluationResponse
+
+logger = logging.getLogger(__name__)
+
+async def get_evaluation_strategy_by_id(self, strategy_id: str) -> EvaluationResponse:
+    try:
+        strategy = self.evaluation_dao.get_evaluation_strategy_by_id(strategy_id)
+
+        if not strategy:
+            raise Exception(f"Evaluation Strategy with ID {strategy_id} not found.")
+
+        # Try to parse the config
+        config_obj = None
+        if isinstance(strategy.config, dict) and "static" in strategy.config and "dynamic" in strategy.config:
+            try:
+                config_obj = EvalConfig(**strategy.config)
+            except Exception as config_err:
+                logger.warning(f"Failed to parse EvalConfig for strategy {strategy.id}: {config_err}")
+                config_obj = None
+        else:
+            logger.warning(f"Config is missing required keys for strategy {strategy.id}: {strategy.config}")
+
+        return EvaluationResponse(
+            evalStrategyId=strategy.id,
+            evalStrategyName=strategy.name,
+            evalStrategydescription=strategy.description,
+            evalstrategyConfig=config_obj,
+            createdBy=strategy.created_by,
+            modifiedBy=strategy.modified_by,
+            createdTs=strategy.created_ts,
+            modifiedTs=strategy.modified_ts
+        )
+
+    except Exception as e:
+        logger.error(f"Exception in fetching evaluation strategy by ID {strategy_id}: {e}", exc_info=True)
+        raise Exception(str(e))
+
+
+
+
+
+
+
 from fts_commons.models.evaluation_models import EvalConfig
 from fts_mgmt.models.response_models import EvaluationResponse
 import logging
