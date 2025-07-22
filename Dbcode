@@ -2,10 +2,11 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 import re
 
-# === Step 1: Read your file ===
-df = pd.read_csv('your_file.csv')  # or use pd.read_excel('your_file.xlsx')
+# === Step 1: Read your CSV file ===
+file_path = 'C:/Users/yezarla.ashok/Desktop/coding/data.csv'  # 🔁 Update path if needed
+df = pd.read_csv(file_path)
 
-# === Step 2: Database connection setup ===
+# === Step 2: PostgreSQL connection settings ===
 username = ''
 password = ''
 host = ''
@@ -13,11 +14,13 @@ port = ''
 database = ''
 table_name = ''
 
+# Create DB connection URL and engine
 db_url = f'postgresql://{username}:{password}@{host}:{port}/{database}'
 engine = create_engine(db_url)
 
-# === Step 3: Function to expand column ===
-def expand_column(column_name, new_type="VARCHAR(1000)"):
+
+# === Step 3: Expand column length in PostgreSQL ===
+def expand_column(engine, table_name, column_name, new_type="VARCHAR(1000)"):
     try:
         with engine.connect() as conn:
             stmt = text(f'ALTER TABLE "{table_name}" ALTER COLUMN "{column_name}" TYPE {new_type};')
@@ -26,7 +29,8 @@ def expand_column(column_name, new_type="VARCHAR(1000)"):
     except Exception as e:
         print(f"❌ Failed to alter column {column_name}: {e}")
 
-# === Step 4: Try inserting and handle length errors ===
+
+# === Step 4: Insert and retry after column expansion ===
 def insert_with_auto_expand():
     try:
         df.to_sql(table_name, engine, if_exists='append', index=False)
@@ -34,19 +38,19 @@ def insert_with_auto_expand():
     except Exception as e:
         msg = str(e)
 
-        # Check if it's a string truncation error
+        # Detect string truncation error
         if "value too long for type character varying" in msg:
-            # Try to extract column name
             match = re.search(r'column "([^"]+)"', msg)
             if match:
                 column_name = match.group(1)
-                print(f"⚠️ Column '{column_name}' caused length error. Attempting to expand...")
-                expand_column(column_name)
-                insert_with_auto_expand()  # 🔁 Retry recursively after fix
+                print(f"⚠️ Column '{column_name}' caused the issue. Attempting to expand...")
+                expand_column(engine, table_name, column_name)
+                insert_with_auto_expand()  # 🔁 Retry
             else:
-                print("❌ Could not identify the column name from the error.")
+                print("❌ Couldn't identify column name in the error message.")
         else:
             print(f"❌ Other error: {e}")
 
-# === Step 5: Execute ===
+
+# === Step 5: Start the process ===
 insert_with_auto_expand()
