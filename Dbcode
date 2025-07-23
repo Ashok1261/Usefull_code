@@ -6,6 +6,13 @@ from sqlalchemy import create_engine, inspect
 file = r'C:\Users\yezarla.ashok\Downloads\6_HoldPartyAssociation.xlsx'
 df = pd.read_excel(file)
 
+if df.empty:
+    print("❌ ERROR: Excel file is empty or not loaded properly.")
+    exit()
+else:
+    print(f"✅ Loaded {len(df)} rows from Excel.")
+    print(df.head(2))
+
 # Step 2: Convert all 'date' columns
 for col in df.columns:
     if 'date' in col.lower():
@@ -20,7 +27,7 @@ max_length = 255
 for col in df.select_dtypes(include='object').columns:
     df[col] = df[col].astype(str).str.slice(0, max_length)
 
-# Step 4: Convert float integers to Int
+# Step 4: Convert float that are actually integers
 for col in df.select_dtypes(include='float').columns:
     if df[col].dropna().apply(float.is_integer).all():
         df[col] = df[col].astype('Int64')
@@ -34,7 +41,6 @@ database = ''
 table_name = ''
 primary_key_column = ''
 
-# Connect
 engine = create_engine(f'postgresql://{username}:{password}@{host}:{port}/{database}')
 conn = psycopg2.connect(host=host, port=port, dbname=database, user=username, password=password)
 cursor = conn.cursor()
@@ -48,11 +54,13 @@ inserted_rows = 0
 for _, row in df.iterrows():
     pk_value = row.get(primary_key_column)
     if pd.isnull(pk_value):
-        continue  # Skip empty PK rows
+        print("⚠️ Skipping row with NULL primary key.")
+        continue
 
-    # Prepare data
+    # Prepare data for UPDATE/INSERT
     update_fields = []
-    values = []
+    update_values = []
+
     insert_columns = []
     insert_values = []
     insert_placeholders = []
@@ -63,7 +71,7 @@ for _, row in df.iterrows():
             if pd.notnull(val):
                 if col != primary_key_column:
                     update_fields.append(f'"{col}" = %s')
-                    values.append(val)
+                    update_values.append(val)
                 insert_columns.append(f'"{col}"')
                 insert_values.append(val)
                 insert_placeholders.append('%s')
@@ -79,13 +87,13 @@ for _, row in df.iterrows():
             SET {', '.join(update_fields)}
             WHERE "{primary_key_column}" = %s
         '''
-        values.append(pk_value)
+        update_values.append(pk_value)
         try:
-            cursor.execute(update_query, values)
+            cursor.execute(update_query, update_values)
             updated_rows += 1
         except Exception as e:
-            print(f"❌ Failed to update PK={pk_value}: {e}")
-    elif not exists:
+            print(f"❌ Update failed for PK={pk_value}: {e}")
+    elif not exists and insert_columns:
         # INSERT
         insert_query = f'''
             INSERT INTO "{table_name}" ({', '.join(insert_columns)})
@@ -95,12 +103,12 @@ for _, row in df.iterrows():
             cursor.execute(insert_query, insert_values)
             inserted_rows += 1
         except Exception as e:
-            print(f"❌ Failed to insert PK={pk_value}: {e}")
+            print(f"❌ Insert failed for PK={pk_value}: {e}")
 
 # Finalize
 conn.commit()
 cursor.close()
 conn.close()
 
-print(f"✅ Updated {updated_rows} rows.")
-print(f"✅ Inserted {inserted_rows} new rows.")
+print(f"✅ Updated {updated_rows} row(s).")
+print(f"✅ Inserted {inserted_rows} row(s).")
