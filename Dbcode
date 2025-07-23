@@ -2,24 +2,16 @@ import pandas as pd
 import psycopg2
 from sqlalchemy import create_engine, inspect
 
-# === Step 1: Load Excel ===
-file = r'C:\Users\yezarla.ashok\Downloads\6_HoldPartyAssociation.xlsx'
-df = pd.read_excel(file)
-
-if df.empty:
-    print("❌ ERROR: Excel file is empty or not found.")
-    exit()
-else:
-    print(f"✅ Loaded {len(df)} rows from Excel.")
-    print(df.head(2))
-
+# === Step 1: Load CSV File ===
+file = r'C:\Users\yezarla.ashok\Downloads\your_file.csv'  # ✅ Update this
+df = pd.read_csv(file)
 
 # === Step 2: Convert date columns ===
 for col in df.columns:
     if 'date' in col.lower():
         try:
             df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
-            print(f"✅ Converted '{col}' to datetime.")
+            print(f"✅ Converted column '{col}' to datetime format.")
         except Exception as e:
             print(f"⚠️ Warning converting '{col}': {e}")
 
@@ -28,107 +20,63 @@ max_length = 255
 for col in df.select_dtypes(include='object').columns:
     df[col] = df[col].astype(str).str.slice(0, max_length)
 
-# === Step 4: Convert float-like integers ===
-for col in df.select_dtypes(include='float').columns:
-    if df[col].dropna().apply(float.is_integer).all():
-        df[col] = df[col].astype('Int64')
+# === Step 4: DB Connection Config ===
+username = 'savant'
+password = 'aiUoXDASqxUAffnA'
+host = '34.70.19.116'
+port = '5432'
+database = 'savantdb'
+table_name = 'IntroBrokerDealer'
+primary_key_column = 'ibd_number'  # ✅ Ensure this is a VARCHAR in DB
 
-# === Step 5: DB Connection ===
-username = ''
-password = ''
-host = ''
-port = ''
-database = ''
-table_name = ''
-primary_key_column = '  # Adjust this if your PK column is different
-
+# === Step 5: Connect to DB ===
 engine = create_engine(f'postgresql://{username}:{password}@{host}:{port}/{database}')
 conn = psycopg2.connect(host=host, port=port, dbname=database, user=username, password=password)
 cursor = conn.cursor()
 inspector = inspect(engine)
 pg_columns = [col['name'] for col in inspector.get_columns(table_name)]
 
-# === Step 6: UPSERT Logic ===
-inserted_rows = 0
+# === Step 6: Update Logic ===
 updated_rows = 0
-skipped_rows = 0
 
 for _, row in df.iterrows():
     pk_value = row.get(primary_key_column)
 
-    update_fields = []
-    update_values = []
+    if pd.isnull(pk_value):
+        print("⚠️ Skipping row with NULL PK.")
+        continue
 
-    insert_columns = []
-    insert_values = []
-    insert_placeholders = []
+    # 🔁 Convert PK to string to match VARCHAR in DB
+    pk_value = str(pk_value)
+
+    update_fields = []
+    values = []
 
     for col in df.columns:
-        if col in pg_columns:
+        if col in pg_columns and col != primary_key_column:
             val = row[col]
             if pd.notnull(val):
-                if col != primary_key_column:
-                    update_fields.append(f'"{col}" = %s')
-                    update_values.append(val)
-                insert_columns.append(f'"{col}"')
-                insert_values.append(val)
-                insert_placeholders.append('%s')
+                update_fields.append(f'"{col}" = %s')
+                values.append(val)
 
-    if pd.notnull(pk_value):
-        # Check if record exists
-        cursor.execute(f'SELECT 1 FROM "{table_name}" WHERE "{primary_key_column}" = %s', (pk_value,))
-        exists = cursor.fetchone()
-
-        if exists and update_fields:
-            # UPDATE
-            update_query = f'''
-                UPDATE "{table_name}"
-                SET {', '.join(update_fields)}
-                WHERE "{primary_key_column}" = %s
-            '''
-            update_values.append(pk_value)
-            try:
-                cursor.execute(update_query, update_values)
-                updated_rows += 1
-            except Exception as e:
-                print(f"❌ Update failed for PK={pk_value}: {e}")
-
-        elif not exists and insert_columns:
-            # INSERT with PK
-            insert_query = f'''
-                INSERT INTO "{table_name}" ({', '.join(insert_columns)})
-                VALUES ({', '.join(insert_placeholders)})
-            '''
-            try:
-                cursor.execute(insert_query, insert_values)
-                inserted_rows += 1
-            except Exception as e:
-                print(f"❌ Insert with PK failed for PK={pk_value}: {e}")
-
-    else:
-        # INSERT without PK — auto-generate primary key
-        print("ℹ️ PK missing → inserting row with auto-generated PK.")
-        insert_columns_no_pk = [col for col in insert_columns if col != f'"{primary_key_column}"']
-        insert_values_no_pk = [val for col, val in zip(insert_columns, insert_values) if col != f'"{primary_key_column}"']
-        insert_placeholders_no_pk = ['%s'] * len(insert_columns_no_pk)
-
-        insert_query = f'''
-            INSERT INTO "{table_name}" ({', '.join(insert_columns_no_pk)})
-            VALUES ({', '.join(insert_placeholders_no_pk)})
+    if update_fields:
+        query = f'''
+            UPDATE "{table_name}"
+            SET {', '.join(update_fields)}
+            WHERE "{primary_key_column}" = %s
         '''
-        try:
-            cursor.execute(insert_query, insert_values_no_pk)
-            inserted_rows += 1
-        except Exception as e:
-            print(f"❌ Insert (auto PK) failed: {e}")
+        values.append(pk_value)  # PK last in VALUES list
 
-# === Step 7: Finalize ===
+        try:
+            cursor.execute(query, values)
+            updated_rows += 1
+        except Exception as e:
+            conn.rollback()
+            print(f"❌ Failed to update row with {primary_key_column}={pk_value}: {e}")
+
+# === Step 7: Commit and Close ===
 conn.commit()
 cursor.close()
 conn.close()
 
-# === Step 8: Summary ===
-print("\n✅ Sync Summary:")
-print(f"   ➕ Inserted  : {inserted_rows}")
-print(f"   ✏️ Updated   : {updated_rows}")
-print(f"   ⏭️ Skipped   : {skipped_rows}")
+print(f"\n✅ Successfully updated {updated_rows} row(s).")
