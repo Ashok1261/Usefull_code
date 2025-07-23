@@ -21,13 +21,13 @@ for col in df.select_dtypes(include='object').columns:
     df[col] = df[col].astype(str).str.slice(0, max_length)
 
 # Step 4: DB Connection config
-username = 'savant'
-password = 'aiUoXDASqxUAffnA'
-host     = '34.70.19.116'
-port     = '5432'
-database = 'savantdb'
-table_name = 'IntroBrokerDealer'
-primary_key_column = 'ibd_number'  # 🔁 Update as per your table
+username = ''
+password = ''
+host     = ''
+port     = ''
+database = ''
+table_name = ''
+primary_key_column = ''  # 🔁 Update as per your table
 
 # Step 5: Connect to DB
 engine = create_engine(f'postgresql://{username}:{password}@{host}:{port}/{database}')
