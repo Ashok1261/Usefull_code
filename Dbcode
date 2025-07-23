@@ -1,70 +1,67 @@
 import pandas as pd
-from sqlalchemy import create_engine, text
-import re
+import psycopg2
+from sqlalchemy import create_engine, inspect
 
-# === Step 1: Load CSV and fix date columns ===
-file_path = 'C:/Users/yezarla.ashok/Desktop/coding/data.csv'  # 🔁 Update as needed
-df = pd.read_csv(file_path)
+# Step 1: Load the CSV file
+file = 'your_file.csv'  # 🔁 Update path
+df = pd.read_csv(file)
 
-# === Step 2: Fix date format columns ===
-def fix_date_columns(df):
-    for col in df.columns:
-        if 'date' in col.lower():
-            try:
-                df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
-                print(f"📅 Converted column '{col}' to datetime format.")
-            except Exception as e:
-                print(f"⚠️ Failed to convert column '{col}' to datetime: {e}")
-    return df
+# Optional: truncate long strings
+max_length = 255
+for col in df.select_dtypes(include='object').columns:
+    df[col] = df[col].astype(str).str.slice(0, max_length)
 
-df = fix_date_columns(df)
-
-# === Step 3: PostgreSQL connection ===
+# Step 2: DB connection details
 username = ''
 password = ''
 host = ''
 port = ''
 database = ''
 table_name = ''
+primary_key_column = ''  # 🔁 Replace with your actual PK column
 
-db_url = f'postgresql://{username}:{password}@{host}:{port}/{database}'
-engine = create_engine(db_url)
+# Step 3: Create connections
+engine = create_engine(f'postgresql://{username}:{password}@{host}:{port}/{database}')
+conn = psycopg2.connect(host=host, port=port, dbname=database, user=username, password=password)
+cursor = conn.cursor()
 
+# Step 4: Get existing columns from the target table
+inspector = inspect(engine)
+pg_columns = [col['name'] for col in inspector.get_columns(table_name)]
 
-# === Step 4: Expand a specific column dynamically ===
-def expand_column(engine, table_name, column_name, new_type="VARCHAR(1000)"):
-    try:
-        with engine.connect() as conn:
-            stmt = text(f'ALTER TABLE "{table_name}" ALTER COLUMN "{column_name}" TYPE {new_type};')
-            conn.execute(stmt)
-            print(f"✅ Expanded column: {column_name} to {new_type}")
-    except Exception as e:
-        print(f"❌ Failed to alter column {column_name}: {e}")
+# Step 5: Update rows
+updated_rows = 0
+for _, row in df.iterrows():
+    pk_value = row.get(primary_key_column)
+    if pd.isnull(pk_value):
+        continue  # Skip if no primary key
 
+    update_fields = []
+    values = []
 
-# === Step 5: Insert with auto column expand retry ===
-def insert_with_auto_expand():
-    try:
-        df.to_sql(table_name, engine, if_exists='append', index=False)
-        print("✅ Data inserted successfully.")
-    except Exception as e:
-        msg = str(e)
+    for col in df.columns:
+        if col in pg_columns and col != primary_key_column:
+            val = row[col]
+            if pd.notnull(val):
+                update_fields.append(f'"{col}" = %s')
+                values.append(val)
 
-        # Check for string length truncation issue
-        if "value too long for type character varying" in msg:
-            match = re.search(r'column "([^"]+)"', msg)
-            if match:
-                column_name = match.group(1)
-                print(f"⚠️ Column '{column_name}' caused length error. Expanding it...")
-                expand_column(engine, table_name, column_name)
-                insert_with_auto_expand()  # Retry after fix
-            else:
-                print("❌ Column name not found in error.")
-        elif "DatetimeFieldOverflow" in msg:
-            print("❌ Date field error! Please ensure all dates are valid and not out of range.")
-        else:
-            print(f"❌ Other error: {e}")
+    if update_fields:
+        update_sql = f'''
+            UPDATE "{table_name}"
+            SET {', '.join(update_fields)}
+            WHERE "{primary_key_column}" = %s
+        '''
+        values.append(pk_value)
 
+        try:
+            cursor.execute(update_sql, values)
+            updated_rows += 1
+        except Exception as e:
+            print(f"❌ Error updating row with {primary_key_column}={pk_value}: {e}")
 
-# === Step 6: Execute the process ===
-insert_with_auto_expand()
+# Step 6: Commit and close
+conn.commit()
+cursor.close()
+conn.close()
+print(f"✅ Successfully updated {updated_rows} row(s).")
