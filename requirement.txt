@@ -1,1 +1,30 @@
+from typing import Annotated, Union, Literal
+from pydantic import BaseModel, Field
 
+class EvaluationRuntimeConfig(BaseModel):
+    type: Literal["evaluation"] = Field(..., description="Type discriminator")
+    evalRunTimeParams: Union[LLMasJudgeRuntimeConfig, RougeEvalRuntimeConfig]
+
+class DataCurationRuntimeConfig(BaseModel):
+    type: Literal["data_curation"] = Field(..., description="Type discriminator")
+    # rest of the fields...
+
+class FTJobRuntimeConfig(BaseModel):
+    type: Literal["fine_tuning"] = Field(..., description="Type discriminator")
+    # rest of the fields...
+
+# Union with discriminator
+DiscriminatedTaskRuntimeConfig = Annotated[
+    Union[
+        DataCurationRuntimeConfig,
+        FTJobRuntimeConfig,
+        EvaluationRuntimeConfig
+    ],
+    Field(discriminator='type')
+]
+
+class TriggerTaskConfig(BaseModel):
+    projectId: str
+    datasetId: str
+    strategyId: str
+    taskRuntimeConfig: DiscriminatedTaskRuntimeConfig
