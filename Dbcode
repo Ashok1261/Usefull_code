@@ -2,39 +2,48 @@ import pandas as pd
 import psycopg2
 from sqlalchemy import create_engine, inspect
 
-# Step 1: Load the CSV file
-file = 'your_file.csv'  # 🔁 Update path
+# Step 1: Load CSV file
+file = 'your_file.csv'  # 🔁 Change to your CSV path
 df = pd.read_csv(file)
 
-# Optional: truncate long strings
+# Step 2: Convert all datetime-like columns (optional but safe)
+for col in df.columns:
+    if 'date' in col.lower():
+        try:
+            df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+            print(f"✅ Converted column '{col}' to datetime format.")
+        except Exception as e:
+            print(f"⚠️ Warning converting column '{col}': {e}")
+
+# Step 3: Truncate long string fields
 max_length = 255
 for col in df.select_dtypes(include='object').columns:
     df[col] = df[col].astype(str).str.slice(0, max_length)
 
-# Step 2: DB connection details
-username = ''
-password = ''
-host = ''
-port = ''
-database = ''
-table_name = ''
-primary_key_column = ''  # 🔁 Replace with your actual PK column
+# Step 4: DB Connection config
+username = 'savant'
+password = 'aiUoXDASqxUAffnA'
+host     = '34.70.19.116'
+port     = '5432'
+database = 'savantdb'
+table_name = 'IntroBrokerDealer'
+primary_key_column = 'ibd_number'  # 🔁 Update as per your table
 
-# Step 3: Create connections
+# Step 5: Connect to DB
 engine = create_engine(f'postgresql://{username}:{password}@{host}:{port}/{database}')
 conn = psycopg2.connect(host=host, port=port, dbname=database, user=username, password=password)
 cursor = conn.cursor()
 
-# Step 4: Get existing columns from the target table
+# Step 6: Fetch actual column names from PostgreSQL
 inspector = inspect(engine)
 pg_columns = [col['name'] for col in inspector.get_columns(table_name)]
 
-# Step 5: Update rows
+# Step 7: Update logic per row
 updated_rows = 0
 for _, row in df.iterrows():
     pk_value = row.get(primary_key_column)
     if pd.isnull(pk_value):
-        continue  # Skip if no primary key
+        continue  # skip rows without PK
 
     update_fields = []
     values = []
@@ -47,7 +56,7 @@ for _, row in df.iterrows():
                 values.append(val)
 
     if update_fields:
-        update_sql = f'''
+        query = f'''
             UPDATE "{table_name}"
             SET {', '.join(update_fields)}
             WHERE "{primary_key_column}" = %s
@@ -55,13 +64,14 @@ for _, row in df.iterrows():
         values.append(pk_value)
 
         try:
-            cursor.execute(update_sql, values)
+            cursor.execute(query, values)
             updated_rows += 1
         except Exception as e:
-            print(f"❌ Error updating row with {primary_key_column}={pk_value}: {e}")
+            print(f"❌ Failed to update row with {primary_key_column}={pk_value}: {e}")
 
-# Step 6: Commit and close
+# Step 8: Commit and close
 conn.commit()
 cursor.close()
 conn.close()
+
 print(f"✅ Successfully updated {updated_rows} row(s).")
