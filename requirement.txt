@@ -1,30 +1,36 @@
-from typing import Annotated, Union, Literal
-from pydantic import BaseModel, Field
-
-class EvaluationRuntimeConfig(BaseModel):
-    type: Literal["evaluation"] = Field(..., description="Type discriminator")
-    evalRunTimeParams: Union[LLMasJudgeRuntimeConfig, RougeEvalRuntimeConfig]
-
 class DataCurationRuntimeConfig(BaseModel):
-    type: Literal["data_curation"] = Field(..., description="Type discriminator")
-    # rest of the fields...
+    taskType: Literal["data_curation"]
+    blob_container: Optional[str] = None
+    blob_path: Optional[str] = ""
+    rai_model_name: Optional[str] = ""
+    rai_wrapper_name: Optional[str] = ""
+    original_qa_gen_model_kwargs: Optional[OriginalQAGenModelKwargsModel] = None
+    diverse_qa_batch_size: Optional[int] = None
+    num_diverse_qa: Optional[NumDiverseQA] = None
+    max_workers: Optional[int] = None
+    diverse_qa_model_kwargs: Optional[DiverseQAModelKwargsModel] = None
 
 class FTJobRuntimeConfig(BaseModel):
-    type: Literal["fine_tuning"] = Field(..., description="Type discriminator")
-    # rest of the fields...
+    taskType: Literal["fine_tuning"]
+    ftJobRunTimeParams: Union[DatabricksRuntimeConfig, MosaicRuntimeConfig]
 
-# Union with discriminator
-DiscriminatedTaskRuntimeConfig = Annotated[
-    Union[
-        DataCurationRuntimeConfig,
-        FTJobRuntimeConfig,
-        EvaluationRuntimeConfig
-    ],
-    Field(discriminator='type')
-]
+class EvalRuntimeConfig(BaseModel):
+    taskType: Literal["evaluation"]
+    rai_model_name: Optional[str] = ""
+    rai_wrapper_name: Optional[str] = ""
+    llm_as_judge_prompt: str
+    llm_as_judge_gen_model_kwargs: Optional[LLMAsJudgekwargs] = None
 
 class TriggerTaskConfig(BaseModel):
-    projectId: str
-    datasetId: str
+    projectId: Optional[str]
+    datasetId: Optional[str]
     strategyId: str
-    taskRuntimeConfig: DiscriminatedTaskRuntimeConfig
+    taskRuntimeConfig: Union[
+        DataCurationRuntimeConfig,
+        FTJobRuntimeConfig,
+        EvalRuntimeConfig
+    ] = Field(..., discriminator="taskType")
+
+    class Config:
+        allow_population_by_field_name = True
+        allow_population_by_alias = True
