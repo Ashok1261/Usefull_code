@@ -2,76 +2,105 @@ import pandas as pd
 import psycopg2
 from sqlalchemy import create_engine, inspect
 
-# Step 1: Load CSV file
-file = 'your_file.csv'  # 🔁 Change to your CSV path
-df = pd.read_csv(file)
+# Step 1: Load Excel
+file = r'C:\Users\yezarla.ashok\Downloads\6_HoldPartyAssociation.xlsx'
+df = pd.read_excel(file)
 
-# Step 2: Convert all datetime-like columns (optional but safe)
+# Step 2: Convert all 'date' columns
 for col in df.columns:
     if 'date' in col.lower():
         try:
             df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
-            print(f"✅ Converted column '{col}' to datetime format.")
+            print(f"✅ Converted '{col}' to datetime.")
         except Exception as e:
-            print(f"⚠️ Warning converting column '{col}': {e}")
+            print(f"⚠️ Warning in '{col}': {e}")
 
-# Step 3: Truncate long string fields
+# Step 3: Truncate long strings
 max_length = 255
 for col in df.select_dtypes(include='object').columns:
     df[col] = df[col].astype(str).str.slice(0, max_length)
 
-# Step 4: DB Connection config
+# Step 4: Convert float integers to Int
+for col in df.select_dtypes(include='float').columns:
+    if df[col].dropna().apply(float.is_integer).all():
+        df[col] = df[col].astype('Int64')
+
+# Step 5: DB connection
 username = ''
 password = ''
-host     = ''
-port     = ''
+host = ''
+port = ''
 database = ''
 table_name = ''
-primary_key_column = ''  # 🔁 Update as per your table
+primary_key_column = ''
 
-# Step 5: Connect to DB
+# Connect
 engine = create_engine(f'postgresql://{username}:{password}@{host}:{port}/{database}')
 conn = psycopg2.connect(host=host, port=port, dbname=database, user=username, password=password)
 cursor = conn.cursor()
-
-# Step 6: Fetch actual column names from PostgreSQL
 inspector = inspect(engine)
 pg_columns = [col['name'] for col in inspector.get_columns(table_name)]
 
-# Step 7: Update logic per row
+# Step 6: UPSERT logic
 updated_rows = 0
+inserted_rows = 0
+
 for _, row in df.iterrows():
     pk_value = row.get(primary_key_column)
     if pd.isnull(pk_value):
-        continue  # skip rows without PK
+        continue  # Skip empty PK rows
 
+    # Prepare data
     update_fields = []
     values = []
+    insert_columns = []
+    insert_values = []
+    insert_placeholders = []
 
     for col in df.columns:
-        if col in pg_columns and col != primary_key_column:
+        if col in pg_columns:
             val = row[col]
             if pd.notnull(val):
-                update_fields.append(f'"{col}" = %s')
-                values.append(val)
+                if col != primary_key_column:
+                    update_fields.append(f'"{col}" = %s')
+                    values.append(val)
+                insert_columns.append(f'"{col}"')
+                insert_values.append(val)
+                insert_placeholders.append('%s')
 
-    if update_fields:
-        query = f'''
+    # Check if PK exists
+    cursor.execute(f'SELECT 1 FROM "{table_name}" WHERE "{primary_key_column}" = %s', (pk_value,))
+    exists = cursor.fetchone()
+
+    if exists and update_fields:
+        # UPDATE
+        update_query = f'''
             UPDATE "{table_name}"
             SET {', '.join(update_fields)}
             WHERE "{primary_key_column}" = %s
         '''
         values.append(pk_value)
-
         try:
-            cursor.execute(query, values)
+            cursor.execute(update_query, values)
             updated_rows += 1
         except Exception as e:
-            print(f"❌ Failed to update row with {primary_key_column}={pk_value}: {e}")
+            print(f"❌ Failed to update PK={pk_value}: {e}")
+    elif not exists:
+        # INSERT
+        insert_query = f'''
+            INSERT INTO "{table_name}" ({', '.join(insert_columns)})
+            VALUES ({', '.join(insert_placeholders)})
+        '''
+        try:
+            cursor.execute(insert_query, insert_values)
+            inserted_rows += 1
+        except Exception as e:
+            print(f"❌ Failed to insert PK={pk_value}: {e}")
 
-# Step 8: Commit and close
+# Finalize
 conn.commit()
 cursor.close()
 conn.close()
 
-print(f"✅ Successfully updated {updated_rows} row(s).")
+print(f"✅ Updated {updated_rows} rows.")
+print(f"✅ Inserted {inserted_rows} new rows.")
