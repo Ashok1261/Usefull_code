@@ -1,1 +1,127 @@
+import json
+from your_project.models import (
+    EvalConfig,
+    EvalStaticConfig,
+    EvaluationRuntimeConfig,
+    TaskStatusEnum,
+    TriggerResponse
+)
+from your_project.utils import (
+    generate_unique_number,
+    flatten_config,
+    get_strategy_storage_path,
+    setup_blob_resource
+)
+from promptflow import PFClient, load_flow
+
+async def trigger_task(self, Task_type_enum, trigger_config):
+    task_id = generate_unique_number()
+    strategy_id = trigger_config.strategyId
+    dataset_id = trigger_config.datasetId
+    project_id = trigger_config.projectId
+
+    # Create Task entry in DB
+    self.task_mgmt_dao.create_task(
+        task_id=task_id,
+        task_type="Evaluation",
+        config=trigger_config.dict(by_alias=True, exclude_none=True),
+        status=TaskStatusEnum.IN_PROGRESS,
+        created_by=self.user_json,
+        project_id=project_id
+    )
+
+    try:
+        # 🔹 Step 1: Fetch strategy data
+        strategy_data = self.dcs_service_dao.get_evaluation_strategy_by_id(strategy_id=strategy_id)
+
+        # 🔹 Step 2: Parse JSON if config is string
+        config_raw = strategy_data.config
+        if isinstance(config_raw, str):
+            config_raw = json.loads(config_raw)
+
+        strategy_static = config_raw.get("static")
+        strategy_dynamic = config_raw.get("dynamic")
+
+        if not strategy_static or not strategy_dynamic:
+            raise Exception("Missing 'static' or 'dynamic' config in strategy")
+
+        if "type" not in strategy_dynamic:
+            strategy_dynamic["type"] = "Evaluation"
+
+        if "evalRunTimeParams" not in strategy_dynamic:
+            raise Exception("Missing 'evalRunTimeParams' in dynamic config")
+
+        # 🔹 Step 3: Build EvalConfig using validated Pydantic models
+        eval_config = EvalConfig(
+            static=EvalStaticConfig(**strategy_static),
+            dynamic=EvaluationRuntimeConfig(**strategy_dynamic)
+        )
+
+        # 🔹 Step 4: Merge trigger input runtime config with strategy config
+        runtime_config = trigger_config.taskRuntimeConfig
+
+        dataset_info = self.data_mgmt_service_dao.get_dataset_info(dataset_id=dataset_id)
+        if not dataset_info:
+            raise Exception(f"Dataset with ID {dataset_id} does not exist")
+
+        dataset_path = dataset_info.storage_path
+        if not runtime_config.blob_path:
+            runtime_config.blob_path = dataset_path
+
+        # Merge runtime config over strategy config
+        updated_dynamic_config = {
+            **eval_config.dynamic.dict(),
+            **runtime_config.dict(exclude_none=True, by_alias=True)
+        }
+
+        # Rebuild final dynamic config
+        eval_config.dynamic = EvaluationRuntimeConfig(**updated_dynamic_config)
+
+        # 🔹 Step 5: Flatten config for Promptflow
+        updated_config = eval_config.dict()
+        flattened_config = flatten_config(updated_config)
+
+        # 🔹 Step 6: Load Promptflow strategy
+        strategy_path = get_strategy_storage_path(strategy_id=strategy_id, strategy_name=strategy_data.name)
+        absolute_path = self.blob_service.blob_location(
+            container_name=BlobConfig().BLOB_DOC_CONTAINER,
+            absolute_path=strategy_path
+        )
+
+        local_workflow_path = f"/promptflow/{task_id}"
+        setup_blob_resource().copy_blob_dir_to_local(absolute_path, local_workflow_path)
+
+        # 🔹 Step 7: Run Promptflow
+        pf_client = PFClient()
+        pf_flow = load_flow(source=local_workflow_path)
+        flow_result = pf_flow.invoke(inputs=flattened_config)
+        results = flow_result.output
+
+        # 🔹 Step 8: Update task success
+        self.task_mgmt_dao.update_task(
+            task_id=task_id,
+            status=TaskStatusEnum.SUCCESS,
+            output={"outputDirectory": flattened_config.get("dynamic_blob_path")}
+        )
+
+        task = self.task_mgmt_dao.get_task_by_id(task_id=task_id)
+        return TriggerResponse(
+            taskId=task.id,
+            taskType=task.type,
+            taskStatus=task.status,
+            createdBy=task.created_by,
+            createdTs=task.created_ts,
+            modifiedBy=task.modified_by,
+            modifiedTs=task.modified_ts
+        )
+
+    except Exception as e:
+        error_msg = f"Evaluation task failed for Task ID {task_id}: {str(e)}"
+        self.task_mgmt_dao.update_task(
+            task_id=task_id,
+            status=TaskStatusEnum.FAILURE,
+            output={"error": error_msg}
+        )
+        logger.error(error_msg, exc_info=True)
+        raise Exception(error_msg)
 
