@@ -1,1 +1,99 @@
 
+async def trigger_task(self, Task_type_enum, trigger_config):
+    task_id = generate_unique_number()
+    es_id = trigger_config.strategyId
+    dataset_id = trigger_config.datasetId
+    project_id = trigger_config.projectId
+
+    self.task_mgmt_dao.create_task(
+        task_id=task_id,
+        task_type="Evaluation",
+        config=trigger_config.dict(by_alias=True, exclude_none=True),
+        status=TaskStatusEnum.IN_PROGRESS,
+        created_by=self.user_json,
+        project_id=project_id
+    )
+
+    try:
+        # Fetch strategy details
+        strategy_data = self.dcs_service_dao.get_evaluation_strategy_by_id(strategy_id=es_id)
+        strategy_name = strategy_data.name
+
+        strategy_static = strategy_data.config.get("static")
+        strategy_dynamic = strategy_data.config.get("dynamic")
+
+        # Ensure type and evalRunTimeParams exist
+        if "type" not in strategy_dynamic:
+            strategy_dynamic["type"] = "Evaluation"
+        if "evalRunTimeParams" not in strategy_dynamic:
+            raise Exception("Missing 'evalRunTimeParams' inside dynamic config")
+
+        # Construct eval_config
+        eval_config = EvalConfig(
+            static=EvalStaticConfig(**strategy_static),
+            dynamic=EvaluationRuntimeConfig(**strategy_dynamic)
+        )
+
+        # Runtime override
+        runtime_config = trigger_config.taskRuntimeConfig
+
+        # Handle dataset path
+        dataset_info = self.data_mgmt_service_dao.get_dataset_info(dataset_id=dataset_id)
+        if not dataset_info:
+            raise Exception(f"Dataset with ID {dataset_id} does not exist")
+        dataset_path = dataset_info.storage_path
+        if not runtime_config.blob_path:
+            runtime_config.blob_path = dataset_path
+
+        # Merge runtime config over dynamic
+        updated_dynamic_config = {
+            **eval_config.dynamic.dict(),
+            **runtime_config.dict(exclude_none=True, by_alias=True)
+        }
+        eval_config.dynamic = EvaluationRuntimeConfig(**updated_dynamic_config)
+
+        # Flatten config
+        updated_config = eval_config.dict()
+        flattened_config = flatten_config(updated_config)
+
+        # Copy workflow from blob
+        strategy_path = get_strategy_storage_path(strategy_id=es_id, strategy_name=strategy_name)
+        absolute_path = self.blob_service.blob_location(
+            container_name=BlobConfig().BLOB_DOC_CONTAINER,
+            absolute_path=strategy_path
+        )
+        local_workflow_path = f"/promptflow/{task_id}"
+        setup_blob_resource().copy_blob_dir_to_local(absolute_path, local_workflow_path)
+
+        # Run promptflow
+        pf_client = PFClient()
+        pf_flow = load_flow(source=local_workflow_path)
+        flow_result = pf_flow.invoke(inputs=flattened_config)
+        results = flow_result.output
+
+        self.task_mgmt_dao.update_task(
+            task_id=task_id,
+            status=TaskStatusEnum.SUCCESS,
+            output={"outputDirectory": flattened_config.get("dynamic_blob_path")}
+        )
+
+        task = self.task_mgmt_dao.get_task_by_id(task_id=task_id)
+        return TriggerResponse(
+            taskId=task.id,
+            taskType=task.type,
+            taskStatus=task.status,
+            createdBy=task.created_by,
+            createdTs=task.created_ts,
+            modifiedBy=task.modified_by,
+            modifiedTs=task.modified_ts
+        )
+
+    except Exception as e:
+        error_msg = f"Evaluation task failed for Task ID {task_id}: {str(e)}"
+        self.task_mgmt_dao.update_task(
+            task_id=task_id,
+            status=TaskStatusEnum.FAILURE,
+            output={"error": error_msg}
+        )
+        logger.error(error_msg, exc_info=True)
+        raise Exception(error_msg)
