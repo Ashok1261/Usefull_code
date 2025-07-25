@@ -1,3 +1,18 @@
+
+# This will get the folder where your script is running
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Join the folder path with the CSV file name (e.g., test.csv)
+    full_path = os.path.join(current_dir, os.path.basename(csv_path))
+
+    print(f"> Full resolved path: {full_path}")
+
+    if not os.path.exists(full_path):
+        raise FileNotFoundError(f"CSV file not found: {full_path}")
+
+
+
+
 import os
 
 # If only file name is passed and not found, prepend current directory
