@@ -1,33 +1,135 @@
-print(f"📥 Raw CSV path input: {csv_path}")
+# ✅ llm_as_judge.py - Promptflow-compatible version with ssrai_config.cfg support
 
-    # This resolves the path relative to the current script location
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    final_path = os.path.join(current_dir, os.path.basename(csv_path))
+import os
+import pandas as pd
+from typing import List
+from promptflow import tool
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from rouge_score import rouge_scorer
+from ast import literal_eval
+from ssrai import SSRAIClient
+import configparser
 
+# ---------------------- Load config ----------------------
+ssrai_config = configparser.ConfigParser()
+ssrai_config.read("ssrai_config.cfg")
 
+ssrai_host = ssrai_config.get("ssrai", "host")
+ssrai_key = ssrai_config.get("ssrai", "eam_consumer_key")
+ssrai_secret = ssrai_config.get("ssrai", "eam_consumer_secret")
+ssrai_client_id = ssrai_config.get("ssrai", "rai_client_id")
 
+# ---------------------- Metric calculation ----------------------
+def compute_metrics(gndth_ans: str, llm_answer: str) -> dict:
+    smoothie = SmoothingFunction().method4
+    bleu_score = sentence_bleu([gndth_ans.split()], llm_answer.split(), smoothing_function=smoothie)
+    scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+    rouge_scores = scorer.score(gndth_ans, llm_answer)
+    rougel_f1 = rouge_scores['rougeL'].fmeasure
+    return {"BLEU": bleu_score, "ROUGE-L": rougel_f1}
 
+# ---------------------- Typewise Accuracy ----------------------
+def question_typewise_accur(df: pd.DataFrame) -> pd.DataFrame:
+    fil_lst = ['Conceptual', 'Reasoning-Based', 'Inferential', 'Factual', 'Procedural']
+    fil_dic = {}
+    for fil in fil_lst:
+        fil_df = df[df["Question Type"] == fil]
+        fil_dic[fil + "_cnt"] = fil_df['business_comparison_score'].count()
+        fil_dic[fil + "_mean"] = round(fil_df['business_comparison_score'].mean(), 2) if not fil_df.empty else None
+    df.reset_index(inplace=True)
+    df["type_wise_overall_bussiness"] = None
+    df.at[0, "type_wise_overall_bussiness"] = fil_dic
+    return df
 
+# ---------------------- Mean Calculation ----------------------
+def get_mean(df_acc, cols: List[str]):
+    for col in cols:
+        try:
+            df_acc[f"overall_{col}"] = None
+            df_acc.loc[0, f"overall_{col}"] = df_acc[col].mean()
+        except Exception as e:
+            print(f"Failed to create accuracy for {col} with error {str(e)}")
+    return df_acc
 
-# This will get the folder where your script is running
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+# ---------------------- LLM Call ----------------------
+def llm_call(input_data: str, llm_as_judge_prompt: str) -> dict:
+    chat_model_name = "power-proxy.gpt4_o"
+    model_kwargs = {"response_format": {"type": "json_object"}}
 
-    # Join the folder path with the CSV file name (e.g., test.csv)
-    full_path = os.path.join(current_dir, os.path.basename(csv_path))
+    ssc_rai_client = SSRAIClient(
+        host=ssrai_host,
+        eam_consumer_key=ssrai_key,
+        auth_type="pat",
+        rai_client_id=ssrai_client_id,
+        eam_consumer_secret=ssrai_secret,
+        api_version="1.0"
+    )
+    llm = ssc_rai_client.llm(wrapper="langchain", model_name=chat_model_name, model_kwargs=model_kwargs)
 
-    print(f"> Full resolved path: {full_path}")
+    prompt = PromptTemplate.from_template(llm_as_judge_prompt)
+    llm_chain = LLMChain(llm=llm, prompt=prompt)
+
+    try:
+        llm_output = llm_chain.predict(input_data=input_data)
+        output = literal_eval(llm_output)
+        return output
+    except Exception as e:
+        print(f"LLM call failed at runtime: {e}")
+        return {"results": [{"error": str(e)}]}
+
+# ---------------------- Promptflow Entry Point ----------------------
+@tool
+def compute_scores_for_df(
+    csv_path: str,
+    output_path: str,
+    llm_as_judge_prompt: str
+) -> str:
+    cwd = os.getcwd()
+    full_path = os.path.join(cwd, "promptflow", csv_path)
 
     if not os.path.exists(full_path):
         raise FileNotFoundError(f"CSV file not found: {full_path}")
 
+    df_results = pd.read_csv(full_path)
+    df_results.reset_index(inplace=True)
+    formatted_output = []
 
+    for index, row in df_results.iterrows():
+        try:
+            input_data = f"""# {index}
+## question: {row['Question']}
+## ground_truth_answer: {row['Answer']}
+## generated_answer: {row['finetuned_response']}"""
+            result = llm_call(input_data=input_data, llm_as_judge_prompt=llm_as_judge_prompt)
+            if result and 'results' in result:
+                scores = result['results'][0]
+                formatted_output.append({
+                    'business_comparison_score': round((scores['accuracy_score'] + scores['completeness_score']) / 2, 2),
+                    **scores
+                })
+            else:
+                formatted_output.append({
+                    'business_comparison_score': None,
+                    'accuracy_score': None,
+                    'completeness_score': None,
+                    'accuracy_explanation': "LLM response missing",
+                    'completeness_explanation': "LLM response missing"
+                })
+        except Exception as e:
+            formatted_output.append({
+                'business_comparison_score': None,
+                'accuracy_score': None,
+                'accuracy_explanation': f"Error: {str(e)}",
+                'completeness_score': None,
+                'completeness_explanation': f"Error: {str(e)}"
+            })
 
+    df_scores = pd.DataFrame(formatted_output)
+    df_acc = pd.concat([df_results, df_scores], axis=1)
+    df_acc = get_mean(df_acc, ["business_comparison_score", "accuracy_score", "completeness_score"])
+    df_acc = question_typewise_accur(df_acc)
 
-import os
-
-# If only file name is passed and not found, prepend current directory
-if not os.path.exists(csv_path):
-    csv_path = os.path.join(os.getcwd(), os.path.basename(csv_path))
-
-if not os.path.isfile(csv_path):
-    raise FileNotFoundError(f"CSV file not found or invalid: {csv_path}")
+    df_acc.to_excel(output_path, in0dex=False, engine="openpyxl")
+    return output_path
