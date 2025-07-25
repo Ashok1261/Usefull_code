@@ -1,3 +1,13 @@
+print(f"📥 Raw CSV path input: {csv_path}")
+
+    # This resolves the path relative to the current script location
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    final_path = os.path.join(current_dir, os.path.basename(csv_path))
+
+
+
+
+
 
 # This will get the folder where your script is running
     current_dir = os.path.dirname(os.path.abspath(__file__))
