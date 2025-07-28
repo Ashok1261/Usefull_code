@@ -1,20 +1,16 @@
-from typing import Any, Dict
-
-def flatten_config(config: Dict[str, Any]) -> Dict[str, Any]:
+def flatten_config(config: dict, parent_key: str = '', sep: str = '.') -> dict:
     """
-    Flattens the 'dynamic' and 'static' sections of the config by prefixing their keys.
-    Keeps nested dicts (like *_kwargs) as is, instead of further flattening them.
+    Recursively flattens a nested dictionary using dot notation for keys.
+
+    Example:
+        {"a": {"b": {"c": 1}}} → {"a.b.c": 1}
     """
-    flattened = {}
-
-    for section in ['dynamic', 'static']:
-        if section in config:
-            for key, value in config[section].items():
-                full_key = f"{section}.{key}"
-                # Preserve kwargs dicts as-is (don't flatten them further)
-                if isinstance(value, dict) and key.endswith("_kwargs"):
-                    flattened[full_key] = value
-                else:
-                    flattened[full_key] = value
-
-    return flattened
+    items = {}
+    for k, v in config.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            # Recurse into nested dictionaries
+            items.update(flatten_config(v, new_key, sep=sep))
+        else:
+            items[new_key] = v
+    return items
