@@ -1,19 +1,1 @@
-def flatten_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    flattened = {}
 
-    def _flatten(d: Dict[str, Any], parent_key: str = '', sep: str = '.'):
-        for k, v in d.items():
-            full_key = f"{parent_key}{sep}{k}" if parent_key else k
-            # 🚨 Preserve whole nested dicts at depth (like model kwargs)
-            if full_key.endswith("llm_as_judge_gen_model_kwargs") and isinstance(v, dict):
-                flattened[full_key] = v  # Keep this dict intact
-            elif isinstance(v, dict):
-                _flatten(v, full_key, sep=sep)
-            else:
-                flattened[full_key] = v
-
-    for section in ['dynamic', 'static']:
-        if section in config:
-            _flatten(config[section], section)
-
-    return flattened
