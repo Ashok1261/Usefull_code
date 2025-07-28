@@ -1,1 +1,20 @@
+from typing import Any, Dict
 
+def flatten_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Flattens the 'dynamic' and 'static' sections of the config by prefixing their keys.
+    Keeps nested dicts (like *_kwargs) as is, instead of further flattening them.
+    """
+    flattened = {}
+
+    for section in ['dynamic', 'static']:
+        if section in config:
+            for key, value in config[section].items():
+                full_key = f"{section}.{key}"
+                # Preserve kwargs dicts as-is (don't flatten them further)
+                if isinstance(value, dict) and key.endswith("_kwargs"):
+                    flattened[full_key] = value
+                else:
+                    flattened[full_key] = value
+
+    return flattened
