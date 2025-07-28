@@ -1,1 +1,15 @@
+def flatten_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    flattened = {}
+
+    for section in ['dynamic', 'static']:
+        if section in config:
+            for key, value in config[section].items():
+                # Do not flatten nested dicts for object-type inputs
+                if isinstance(value, dict) and key.endswith("_kwargs"):
+                    flattened[f"{section}.{key}"] = value
+                else:
+                    # Flatten normally
+                    flattened[f"{section}.{key}"] = value
+
+    return flattened
 
