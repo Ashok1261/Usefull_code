@@ -1,3 +1,30 @@
+
+# Step 4: Merge trigger input runtime config with strategy config
+runtime_config = trigger_config.taskRuntimeConfig
+
+# Remove keys from runtime_config that are explicitly empty strings
+rc_dict = runtime_config.dict(exclude_none=True, by_alias=True)
+
+# This removes keys like {"csv_path": ""}, if present
+cleaned_rc_dict = {
+    k: v for k, v in rc_dict.items()
+    if not (isinstance(v, str) and v.strip() == "")
+}
+
+# Merge cleaned runtime config into original strategy config
+updated_dynamic_config = {
+    **eval_config.dynamic.dict(),
+    **cleaned_rc_dict
+}
+
+# Rebuild final dynamic config
+eval_config.dynamic = EvaluationRuntimeConfig(**updated_dynamic_config)
+
+
+
+
+
+
 def flatten_config(config: dict, parent_key: str = '', sep: str = '_') -> dict:
     """
     Flattens nested dictionary except for *_kwargs which are kept as full objects.
