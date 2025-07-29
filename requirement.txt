@@ -1,1 +1,11 @@
+updated_dynamic_config = eval_config.dynamic.dict()
+runtime_dict = runtime_config.dict(exclude_none=True, by_alias=True)
 
+for key, val in runtime_dict.items():
+    if isinstance(val, dict):
+        updated_dynamic_config[key] = {
+            **updated_dynamic_config.get(key, {}),
+            **{k: v for k, v in val.items() if v != "" and v is not None}
+        }
+    elif val != "" and val is not None:
+        updated_dynamic_config[key] = val
