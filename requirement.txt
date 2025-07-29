@@ -1,1 +1,37 @@
+import os
+import glob
+
+@tool
+def compute_scores_for_df(
+    csv_path: str,
+    output_path: str,
+    llm_as_judge_prompt: str,
+    rai_model_name: str,
+    rai_wrapper_name: str,
+    llm_as_judge_gen_model_kwargs: dict,
+    qstn_col="Question",
+    col_generated_ans="finetuned_response",
+    gndth_col="Answer"
+) -> str:
+    """
+    Loads CSV and computes evaluation metrics like BLEU, ROUGE.
+    """
+
+    # Step 1: If csv_path is empty, look for CSV in local promptflow folder
+    if not csv_path or csv_path.strip() == "":
+        current_dir = os.getcwd()
+        print(f"[INFO] No CSV path provided. Looking for CSV in: {current_dir}")
+
+        csv_files = glob.glob(os.path.join(current_dir, "*.csv"))
+        if not csv_files:
+            raise FileNotFoundError("No CSV file found in the current directory.")
+        
+        csv_path = csv_files[0]
+        print(f"[INFO] Auto-detected CSV file: {csv_path}")
+
+    print(f"Final CSV path: {csv_path}")
+
+    # Step 2: Proceed with reading and evaluation
+    df_results = pd.read_csv(csv_path)
+    ...
 
