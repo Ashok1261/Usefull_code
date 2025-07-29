@@ -1,3 +1,15 @@
+output_path = flattened_config.get("dynamic.evalRunTimeParams.blob_path")
+self.task_mgmt_dao.update_task(
+    task_id=task_id,
+    status=TaskStatusEnum.SUCCESS,
+    output={"outputDirectory": output_path}
+)
+
+
+
+
+
+
 import os
 import glob
 
