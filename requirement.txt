@@ -1,73 +1,139 @@
-ax1.set_ylim(0, 110)
-ax1.set_yticklabels([f"{int(tick)}" for tick in ax1.get_yticks()], fontweight='bold', fontsize=12)
+import os
+import time
+import logging
+from promptflow.client import PFClient, load_flow
+from common_svc.logger.log_util import configure_loggers
+from common_svc.storage.blob_client import setup_blob_resource
+from common_svc.storage.blob_service import BlobService
+from common_svc.config.config_store import BlobConfig
+from fts_commons.utils.util import get_current_datetime, flatten_config, get_strategy_storage_path
+from fts_commons.db.model import Task, Dataset, DataCurationStrategies, EvaluationStrategy
+from fts_commons.utils.objects import TaskStatusEnum, TaskTypeEnum
+from sqlalchemy import literal
+from common_svc.db.base import DBSession
+import warnings
 
+warnings.filterwarnings("ignore")
+configure_loggers()
+logger = logging.getLogger(__name__)
 
+PROMPTFLOW_ROOT_PATH = os.path.abspath("./promptflows")
+os.makedirs(PROMPTFLOW_ROOT_PATH, exist_ok=True)
 
+def fetch_and_lock_pending_task():
+    try:
+        with DBSession() as db:
+            task = db.session.query(Task)\
+                .filter(Task.status == TaskStatusEnum.NOT_STARTED.value)\
+                .order_by(Task.modified_ts.asc())\
+                .first()
+            if task:
+                logger.info(f"Locked and fetched task ID: {task.id}")
+                task.status = TaskStatusEnum.IN_PROGRESS.value
+                task.modified_ts = get_current_datetime()
+            return task
+    except Exception as e:
+        logger.error(f"Error locking task: {e}", exc_info=True)
+        return None
 
+def merge_dynamic_configs(static_cfg: dict, dynamic_cfg: dict, runtime_cfg: dict, task_type: str, dataset=None):
+    if task_type == TaskTypeEnum.DATA_CURATION.value:
+        if not runtime_cfg.get("blob_path") and dataset:
+            runtime_cfg["blob_path"] = dataset.storage_path
+    elif task_type == TaskTypeEnum.EVALUATION.value:
+        if not runtime_cfg.get("evalRunTimeParams"):
+            runtime_cfg["evalRunTimeParams"] = {}
 
-import matplotlib.pyplot as plt
-import numpy as np
+    merged_dynamic = {**(dynamic_cfg or {}), **(runtime_cfg or {})}
+    return {
+        "static": static_cfg,
+        "dynamic": merged_dynamic
+    }
 
-# Data
-volumes = ['40K', '52K', '80K + 22K']
-factual = [22, 22, 22]
-conceptual = [18, 18, 18]
-procedural = [0, 12, 12]
-reasoning = [0, 0, 14]
-inferential = [0, 0, 14]
-accuracy = [48, 70, 79]
+def process_promptflow_task(task):
+    try:
+        logger.info(f"Processing task: {task.id}")
+        config = task.config or {}
+        task_type = task.task_type
 
-# Stack the question type data
-data = np.array([factual, conceptual, procedural, reasoning, inferential])
-x = np.arange(len(volumes))
+        with DBSession() as db:
+            if task_type == TaskTypeEnum.DATA_CURATION.value:
+                dataset = db.session.query(Dataset).filter(Dataset.id == config['datasetId']).first()
+                strategy = db.session.query(DataCurationStrategies).filter(DataCurationStrategies.id == config['dataCurationStrategyId']).first()
+            elif task_type == TaskTypeEnum.EVALUATION.value:
+                dataset = db.session.query(Dataset).filter(Dataset.id == config['datasetId']).first()
+                strategy = db.session.query(EvaluationStrategy).filter(EvaluationStrategy.id == config['strategyId']).first()
+            else:
+                raise ValueError(f"Unsupported task type: {task_type}")
 
-# Plot setup
-fig, ax1 = plt.subplots(figsize=(10, 6))
+        if not strategy or not dataset:
+            raise Exception("Strategy or Dataset not found")
 
-# Colors
-colors = ['#1f77b4', '#e84393', '#2ca02c', '#d62728', '#9467bd']
-labels = ['Factual', 'Conceptual', 'Procedural', 'Reasoning', 'Inferential']
+        strategy_path = get_strategy_storage_path(strategy.id, strategy.name)
+        blob_service = BlobService()
+        blob_location = blob_service.blob_location(
+            container_name=BlobConfig().BLOB_DOC_CONTAINER,
+            absolute_path=strategy_path
+        )
 
-# Stacked bar chart
-bottom = np.zeros(len(volumes))
-for i in range(len(data)):
-    bars = ax1.bar(x, data[i], bottom=bottom, color=colors[i], label=labels[i])
-    for j, bar in enumerate(bars):
-        if data[i][j] > 0:
-            ax1.text(
-                bar.get_x() + bar.get_width() / 2,
-                bottom[j] + data[i][j] / 2,
-                f'{data[i][j]}K',
-                ha='center',
-                va='center',
-                fontsize=10,
-                fontweight='bold',
-                color='white'
-            )
-    bottom += data[i]
+        local_path = os.path.join(PROMPTFLOW_ROOT_PATH, str(task.id))
+        os.makedirs(local_path, exist_ok=True)
+        setup_blob_resource().copy_blob_dir_to_local(blob_location, local_path)
 
-# Accuracy line plot
-ax1.plot(x, accuracy, color='black', marker='o', linewidth=2, label='Accuracy (%)')
-for i, acc in enumerate(accuracy):
-    ax1.text(x[i], acc + 2, f'{acc}%', ha='center', fontsize=11, fontweight='bold', color='black')
+        strategy_cfg = strategy.config or {}
+        static_cfg = strategy_cfg.get("static", {})
+        dynamic_cfg = strategy_cfg.get("dynamic", {})
+        runtime_cfg = config.get("data_curation_strategy_dynamic_config", {})
 
-# Axis formatting
-ax1.set_xticks(x)
-ax1.set_xticklabels(volumes, fontsize=12, fontweight='bold')
-ax1.set_ylabel("Accuracy (%)", fontsize=13, fontweight='bold')
-ax1.set_xlabel("Data Volume", fontsize=13, fontweight='bold')
-ax1.set_ylim(0, 110)
-ax1.tick_params(axis='y', labelsize=12, labelcolor='black')
-ax1.set_title("Question Distribution and Accuracy by Data Volume", fontsize=15, fontweight='bold')
-ax1.grid(False)
+        merged_config = merge_dynamic_configs(static_cfg, dynamic_cfg, runtime_cfg, task_type, dataset)
+        flat_inputs = flatten_config(merged_config)
 
-# Custom legend
-custom_labels = labels + ['Accuracy']
-custom_colors = colors + ['black']
-custom_handles = [plt.Line2D([0], [0], color=color, lw=10) for color in custom_colors]
-plt.legend(custom_handles, custom_labels, loc='lower center', bbox_to_anchor=(0.5, -0.25), ncol=6, fontsize=10, frameon=False)
+        pf = PFClient()
+        flow = load_flow(local_path)
+        result = flow.invoke(inputs=flat_inputs)
 
-# Save the figure
-plt.tight_layout()
-plt.savefig("/mnt/data/final_question_accuracy_distribution.png", dpi=300, bbox_inches='tight')
-plt.show()
+        if not result.output:
+            raise Exception("Promptflow returned no output.")
+
+        output_key = "dynamic_blob_path" if task_type == TaskTypeEnum.DATA_CURATION.value else "dynamic_evalRunTimeParams_blob_path"
+        output_path = flat_inputs.get(output_key, "")
+
+        with DBSession() as db:
+            task_record = db.session.query(Task).filter(Task.id == task.id).first()
+            if task_record:
+                task_record.status = TaskStatusEnum.SUCCESS.value
+                task_record.output = {
+                    "outputDirectory": output_path,
+                    "results": result.output
+                }
+                task_record.modified_ts = get_current_datetime()
+
+    except Exception as e:
+        logger.error(f"Promptflow failed for task {task.id}: {str(e)}", exc_info=True)
+        with DBSession() as db:
+            task_record = db.session.query(Task).filter(Task.id == task.id).one_or_none()
+            if task_record:
+                task_record.status = TaskStatusEnum.FAILURE.value
+                task_record.output = {
+                    "error": str(e)
+                }
+                task_record.modified_ts = get_current_datetime()
+
+def daemon_loop(max_workers=3):
+    logger.info("Daemon started for Data Curation & Evaluation")
+    while True:
+        try:
+            tasks = []
+            for _ in range(max_workers):
+                task = fetch_and_lock_pending_task()
+                if task:
+                    tasks.append(task)
+            if tasks:
+                for task in tasks:
+                    process_promptflow_task(task)
+            else:
+                logger.info("No tasks pending. Sleeping for 60 seconds.")
+                time.sleep(60)
+        except Exception as e:
+            logger.error(f"Daemon loop error: {e}", exc_info=True)
+            time.sleep(60)
