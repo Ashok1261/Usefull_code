@@ -1,3 +1,14 @@
+Completed the Promptflow configuration for the evaluation workflow.
+Next steps:
+
+Update the Task Management API to support evaluation flow execution.
+
+Modify the daemon processing logic to trigger and handle evaluation tasks alongside existing processes.
+
+
+
+
+
 import matplotlib.pyplot as plt
 
 # Accuracy data
