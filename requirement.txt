@@ -1,3 +1,56 @@
+
+import pandas as pd
+from vllm import LLM, SamplingParams
+
+# 1. Load CSV file (with Question Type, Question, Answer)
+csv_path = "questions.csv"  # Update this path
+df = pd.read_csv(csv_path)
+
+# 2. Create prompts that include Question + Answer for context
+prompts = []
+for _, row in df.iterrows():
+    q_type = row['Question Type']
+    question = row['Question']
+    answer = row['Answer']
+    
+    prompt = (
+        f"You are an expert in {q_type} questions.\n"
+        f"Question: {question}\n"
+        f"Reference Answer: {answer}\n"
+        f"Generate a finetuned answer for the question:"
+    )
+    prompts.append(prompt)
+
+# 3. Define sampling params
+sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=150)
+
+# 4. Initialize model
+try:
+    llm = LLM(model="/Volumes/dev2_catalog_01/default/txt-wtf-pe/data/Facebook_opt_125m/")
+except Exception as e:
+    print(f"Error initializing LLM: {e}")
+    exit()
+
+# 5. Generate responses
+print("Generating Finetuned Responses...")
+outputs = llm.generate(prompts, sampling_params)
+print("Done.")
+
+# 6. Append results
+df["Finetuned_Response"] = [output.outputs[0].text.strip() for output in outputs]
+
+# 7. Save to new CSV
+output_path = "questions_with_finetuned_response.csv"
+df.to_csv(output_path, index=False)
+print(f"Saved updated file to: {output_path}")
+
+
+
+
+
+
+
+
 # Fetch strategy
 strategy = db.session.query(EvaluationStrategies).filter(EvaluationStrategies.id == config['strategyId']).first()
 
