@@ -1,3 +1,10 @@
+ax1.set_ylim(0, 110)
+ax1.set_yticklabels([f"{int(tick)}" for tick in ax1.get_yticks()], fontweight='bold', fontsize=12)
+
+
+
+
+
 import matplotlib.pyplot as plt
 import numpy as np
 
