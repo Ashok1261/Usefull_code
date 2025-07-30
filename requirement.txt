@@ -1,1 +1,172 @@
+import os
+import time
+import json
+import logging
+import warnings
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from promptflow.client import PFClient, load_flow
+from sqlalchemy import literal
+from sqlalchemy.dialects.postgresql import JSONB
+
+from common_svc.db.base import DBSession
+from common_svc.logger.log_util import configure_loggers
+from common_svc.storage.blob_client import setup_blob_resource
+from common_svc.storage.blob_service import BlobService
+from common_svc.config.config_store import BlobConfig
+
+from fts_commons.utils.util import get_current_datetime, flatten_config, get_strategy_storage_path
+from fts_commons.db.model import DataCurationStrategies, Dataset, EvaluationStrategies, Task
+from fts_commons.utils.objects import DataCurationRuntimeConfig, TaskStatusEnum, TaskTypeEnum
+
+warnings.filterwarnings("ignore")
+configure_loggers()
+logger = logging.getLogger(__name__)
+
+PROMPTFLOW_ROOT_PATH = os.path.abspath("./promptflows")
+os.makedirs(PROMPTFLOW_ROOT_PATH, exist_ok=True)
+
+def fetch_and_lock_pending_task():
+    try:
+        with DBSession() as db:
+            task = (
+                db.session.query(Task)
+                .filter(Task.status == literal("Not Started").cast(JSONB))
+                .order_by(Task.modified_ts.asc())
+                .first()
+            )
+            if task:
+                logger.info(f"Locked and fetched task ID: {task.id}")
+                task.status = TaskStatusEnum.IN_PROGRESS
+                task.modified_ts = get_current_datetime()
+            else:
+                logger.info("No tasks found with status 'Not Started'")
+            return task
+    except Exception as e:
+        logger.error(f"Error locking task: {e}", exc_info=True)
+        raise Exception("Failed to fetch and lock pending task.")
+
+def merge_runtime_with_dynamic(static_cfg: dict, dynamic_cfg: dict, runtime_cfg: dict):
+    merged_dynamic = {**(dynamic_cfg or {}), **(runtime_cfg or {})}
+    return {
+        "static": static_cfg,
+        "dynamic": DataCurationRuntimeConfig(**merged_dynamic).dict()
+    }
+
+def process_promptflow_task(task):
+    try:
+        logger.info(f"Processing task: {task.id}")
+
+        config = task.config or {}
+        if isinstance(config, str):
+            config = json.loads(config)
+
+        task_type = config.get("task_type")
+
+        if task_type == TaskTypeEnum.DATA_CURATION.value:
+            if 'datasetId' not in config or 'dataCurationStrategyId' not in config:
+                raise KeyError("Missing 'datasetId' or 'dataCurationStrategyId' in config")
+
+            with DBSession() as db:
+                dataset = db.session.query(Dataset).filter(Dataset.id == config['datasetId']).first()
+                dcs = db.session.query(DataCurationStrategies).filter(DataCurationStrategies.id == config['dataCurationStrategyId']).first()
+
+            if not dataset or not dcs:
+                raise Exception("Dataset or Data Curation Strategy not found")
+
+            blob_location = BlobService().blob_location(
+                container_name=BlobConfig().BLOB_DOC_CONTAINER,
+                absolute_path=get_strategy_storage_path(dcs.id, dcs.name)
+            )
+
+            local_path = os.path.join(PROMPTFLOW_ROOT_PATH, str(task.id))
+            setup_blob_resource().copy_blob_dir_to_local(blob_location, local_path)
+            static_cfg = dcs.config.get("static", {})
+            dynamic_cfg = dcs.config.get("dynamic", {})
+            runtime_cfg = config.get("data_curation_strategy_dynamic_config", {})
+
+            if not runtime_cfg.get("blob_path"):
+                runtime_cfg["blob_path"] = dataset.storage_path
+
+            merged_config = merge_runtime_with_dynamic(static_cfg, dynamic_cfg, runtime_cfg)
+            flat_inputs = flatten_config(merged_config)
+
+        elif task_type == TaskTypeEnum.EVALUATION.value:
+            if 'strategyId' not in config:
+                raise KeyError("Missing 'strategyId' in config")
+
+            with DBSession() as db:
+                strategy = db.session.query(EvaluationStrategies).filter(EvaluationStrategies.id == config['strategyId']).first()
+
+            if not strategy:
+                raise Exception("Evaluation Strategy not found")
+
+            blob_location = BlobService().blob_location(
+                container_name=BlobConfig().BLOB_DOC_CONTAINER,
+                absolute_path=get_strategy_storage_path(strategy.id, strategy.name)
+            )
+
+            local_path = os.path.join(PROMPTFLOW_ROOT_PATH, str(task.id))
+            setup_blob_resource().copy_blob_dir_to_local(blob_location, local_path)
+
+            static_cfg = strategy.config.get("static", {})
+            dynamic_cfg = strategy.config.get("dynamic", {})
+            runtime_cfg = config.get("evalRunTimeParams", {})
+            merged_config = {"static": static_cfg, "dynamic": {"evalRunTimeParams": runtime_cfg}}
+            flat_inputs = flatten_config(merged_config)
+
+        else:
+            raise ValueError(f"Unsupported task type: {task_type}")
+
+        pf = PFClient()
+        flow = load_flow(local_path)
+        result = flow.invoke(inputs=flat_inputs)
+
+        if not result.output:
+            raise Exception("Promptflow returned no output.")
+
+        output_path = flat_inputs.get("dynamic_blob_path") or flat_inputs.get("dynamic.evalRunTimeParams.blob_path")
+
+        with DBSession() as db:
+            task_record = db.session.query(Task).filter(Task.id == task.id).first()
+            if task_record:
+                task_record.status = TaskStatusEnum.SUCCESS
+                task_record.output = {
+                    "outputDirectory": output_path,
+                    "results": result.output
+                }
+                task_record.modified_ts = get_current_datetime()
+
+    except Exception as e:
+        logger.error(f"Promptflow failed for task {task.id}: {str(e)}", exc_info=True)
+        with DBSession() as db:
+            task_record = db.session.query(Task).filter(Task.id == task.id).one_or_none()
+            if task_record:
+                task_record.status = TaskStatusEnum.FAILURE
+                task_record.output = {"error": str(e)}
+                task_record.modified_ts = get_current_datetime()
+
+def daemon_loop_parallel(max_workers=3):
+    logger.info("Promptflow Parallel Daemon Started")
+    while True:
+        try:
+            tasks = []
+            for _ in range(max_workers):
+                task = fetch_and_lock_pending_task()
+                if task:
+                    tasks.append(task)
+            if tasks:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(process_promptflow_task, task): task for task in tasks}
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logger.error(f"Error processing task in parallel: {e}", exc_info=True)
+            else:
+                logger.info("No pending tasks. Sleeping for 60 seconds.")
+                time.sleep(60)
+        except Exception as e:
+            logger.error(f"Daemon loop error: {e}", exc_info=True)
+            time.sleep(60)
 
