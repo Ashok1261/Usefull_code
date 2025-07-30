@@ -1,1 +1,76 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Accuracy and data volume
+accuracy = [79, 84, 91]
+volumes = [80_000, 200_000, 112_000]  # Raw QA volume values
+
+# Normalize volume to 100 for visual comparison
+volume_scaled = np.array(volumes) / max(volumes) * 100
+
+# X-axis labels
+x_labels = [
+    "Original QA\n(80K)",
+    "Consolidated QA\nPre-CoT Filter\n(200K)",
+    "Consolidated QA\nPost-CoT Filter\n(112K)"
+]
+
+x = np.arange(len(accuracy))
+
+# Set up the figure and axis
+fig, ax1 = plt.subplots(figsize=(10, 6))
+
+# Bar colors: Blue, Magenta, Green
+colors = ['#0074D9', '#B10DC9', '#2ECC40']
+
+# Plot volume bars
+bars = ax1.bar(x, volume_scaled, color=colors, width=0.4)
+
+# Left Y-axis for volume
+ax1.set_ylabel("QA Volume (Scaled %)", fontsize=14, fontweight='bold')
+ax1.set_ylim(0, 110)
+ax1.tick_params(axis='y', labelsize=12)
+for label in ax1.get_yticklabels():
+    label.set_fontweight('bold')
+
+# Right Y-axis for accuracy
+ax2 = ax1.twinx()
+ax2.plot(x, accuracy, color='black', linestyle='-', marker='o', linewidth=2, label='Accuracy')
+ax2.set_ylabel("Accuracy (%)", fontsize=14, fontweight='bold', color='black')
+ax2.set_ylim(0, 100)
+ax2.tick_params(axis='y', labelsize=12)
+for label in ax2.get_yticklabels():
+    label.set_fontweight('bold')
+
+# Annotate volume inside bars
+for i, bar in enumerate(bars):
+    ax1.text(
+        bar.get_x() + bar.get_width() / 2,
+        bar.get_height() / 2,
+        f"{volumes[i]//1000}K",
+        ha='center',
+        va='center',
+        fontsize=12,
+        fontweight='bold',
+        color='white'
+    )
+
+# Annotate accuracy values above points
+for i, acc in enumerate(accuracy):
+    ax2.text(x[i], acc + 2, f"{acc}%", ha='center', fontsize=12, fontweight='bold', color='black')
+
+# X-axis styling
+ax1.set_xticks(x)
+ax1.set_xticklabels(x_labels, fontsize=12, fontweight='bold')
+ax1.set_xlabel("QA Stages", fontsize=14, fontweight='bold')
+
+# Title
+plt.title("QA Volume and Accuracy Across QA Pipeline with CoT Filtering",
+          fontsize=16, fontweight='bold')
+
+# Save output
+plt.tight_layout()
+plt.savefig("qa_volume_accuracy_inside_bar_label.png", dpi=300, bbox_inches='tight')
+plt.savefig("qa_volume_accuracy_inside_bar_label.pdf", bbox_inches='tight')
+plt.show()
 
