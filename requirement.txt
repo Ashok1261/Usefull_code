@@ -1,1 +1,35 @@
+import matplotlib.pyplot as plt
+import numpy as np
 
+# Data
+volumes = ['30K', '50L', '1L']
+factual = [30, 40, 80]
+conceptual = [40, 50, 75]
+procedural = [0, 50, 80]
+reasoning = [0, 0, 80]
+inferential = [0, 0, 82]
+accuracy = [70, 80, 90]
+
+# Normalize data to 100%
+data = np.array([factual, conceptual, procedural, reasoning, inferential])
+column_sums = data.sum(axis=0)
+normalized_data = (data / column_sums) * 100
+
+# Plot setup
+x = np.arange(len(volumes))
+fig, ax1 = plt.subplots(figsize=(10, 6))
+
+# Define colors (conceptual color changed to purple-pink)
+colors = ['#1f77b4', '#e84393', '#2ca02c', '#d62728', '#9467bd']
+labels = ['Factual', 'Conceptual', 'Procedural', 'Reasoning', 'Inferential']
+
+# Plot stacked bars
+bottom = np.zeros(len(volumes))
+for i in range(len(normalized_data)):
+    bars = ax1.bar(x, normalized_data[i], bottom=bottom, label=labels[i], color=colors[i])
+    for j, bar in enumerate(bars):
+        if normalized_data[i][j] > 3:
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                bottom[j] + normalized_data[i][j] / 2,
+                f'{normalized
