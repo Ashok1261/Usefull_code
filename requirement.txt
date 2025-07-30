@@ -5,19 +5,19 @@ qa_labels = ["Original Q&A", "Consolidated Q&A\nPre-CoT Filter", "Consolidated Q
 qa_volumes = [80_000, 200_000, 112_000]
 accuracy = [79, 84, 91]
 
-# Scale volume data to percentage for bar height (max volume = 100)
+# Scale volume data to percentage for plotting
 scaled_volumes = [v / max(qa_volumes) * 100 for v in qa_volumes]
 
 # Bar colors
 colors = ['#0074D9', '#B10DC9', '#2ECC40']  # Blue, Magenta, Green
 
-# Create plot
+# Create the figure and axis
 fig, ax = plt.subplots(figsize=(10, 6))
 
 # Plot bars
 bars = ax.bar(range(len(qa_labels)), scaled_volumes, color=colors)
 
-# Volume inside bars
+# Add volume values inside bars
 for bar, volume in zip(bars, qa_volumes):
     ax.text(
         bar.get_x() + bar.get_width() / 2,
@@ -30,22 +30,32 @@ for bar, volume in zip(bars, qa_volumes):
         fontweight='bold'
     )
 
-# Plot accuracy line on same Y-axis
+# Plot accuracy line
 ax.plot(range(len(qa_labels)), accuracy, color='black', marker='o', linewidth=2)
 for i, acc in enumerate(accuracy):
-    ax.text(i, accuracy[i] + 2, f"{acc}%", ha='center', color='black', fontsize=12, fontweight='bold')
+    ax.text(i, acc + 2, f"{acc}%", ha='center', color='black', fontsize=12, fontweight='bold')
 
-# Styling
+# Set axis labels and title
 ax.set_xticks(range(len(qa_labels)))
 ax.set_xticklabels(qa_labels, fontsize=12, fontweight='bold')
 ax.set_ylabel("QA Volume (Scaled %)", fontsize=14, fontweight='bold')
 ax.set_xlabel("Data Curation Strategies", fontsize=14, fontweight='bold')
 ax.set_title("Data Volume Vs Accuracy across different Curation Strategies", fontsize=16, fontweight='bold')
-ax.tick_params(axis='y', labelsize=12)
-ax.grid(axis='y', linestyle='--', alpha=0.5)
 
-# Save chart
+# Make tick values bold
+ax.tick_params(axis='y', labelsize=12)
+for label in ax.get_yticklabels():
+    label.set_fontweight('bold')
+for label in ax.get_xticklabels():
+    label.set_fontweight('bold')
+
+# Clean look: remove grid and borders
+ax.grid(False)
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+# Save the chart
 plt.tight_layout()
-plt.savefig("qa_volume_accuracy_no_right_axis.png", dpi=300)
-plt.savefig("qa_volume_accuracy_no_right_axis.pdf")
+plt.savefig("qa_volume_accuracy_clean_bold_ticks.png", dpi=300)
+plt.savefig("qa_volume_accuracy_clean_bold_ticks.pdf")
 plt.show()
