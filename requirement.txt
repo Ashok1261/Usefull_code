@@ -1,1 +1,78 @@
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Accuracy and volume data
+accuracy = [79, 84, 91]
+volumes = [80_000, 200_000, 112_000]
+x_labels = [
+    "Original Q&A",
+    "Consolidated Q&A\nPre-CoT Filter",
+    "Consolidated Q&A\nPost-CoT Filter"
+]
+
+# Scale volume for visual comparison
+volume_scaled = np.array(volumes) / max(volumes) * 100
+x = np.arange(len(x_labels))
+
+# Set up figure
+fig, ax1 = plt.subplots(figsize=(10, 6))
+
+# Bar colors
+colors = ['#0074D9', '#B10DC9', '#2ECC40']
+
+# Plot volume bars
+bars = ax1.bar(x, volume_scaled, color=colors, width=0.4)
+
+# Annotate volume inside each bar
+for i, bar in enumerate(bars):
+    ax1.text(
+        bar.get_x() + bar.get_width() / 2,
+        bar.get_height() / 2,
+        f"{volumes[i]//1000}K",
+        ha='center',
+        va='center',
+        fontsize=12,
+        fontweight='bold',
+        color='white'
+    )
+
+# Label Y-axis (left) for volume
+ax1.set_ylabel("QA Volume (Scaled %)", fontsize=14, fontweight='bold')
+ax1.set_ylim(0, 110)
+ax1.set_xticks(x)
+ax1.set_xticklabels(x_labels, fontsize=12, fontweight='bold')
+ax1.set_xlabel("Data Curation Strategies", fontsize=14, fontweight='bold')
+ax1.tick_params(axis='y', labelsize=12)
+for label in ax1.get_yticklabels():
+    label.set_fontweight('bold')
+
+# Plot accuracy line on secondary Y-axis
+ax2 = ax1.twinx()
+ax2.plot(x, accuracy, color='black', marker='o', linestyle='-', linewidth=2)
+ax2.set_ylabel("Accuracy (%)", fontsize=14, fontweight='bold', color='black')
+ax2.set_ylim(0, 100)
+ax2.tick_params(axis='y', labelsize=12)
+for label in ax2.get_yticklabels():
+    label.set_fontweight('bold')
+
+# Annotate accuracy on top of line
+for i, acc in enumerate(accuracy):
+    ax2.text(
+        x[i], acc + 2,
+        f"{acc}%",
+        ha='center',
+        fontsize=12,
+        fontweight='bold',
+        color='black'
+    )
+
+# Title
+plt.title("Data Volume Vs Accuracy across different Curation Strategies",
+          fontsize=16, fontweight='bold')
+
+# Save output
+plt.tight_layout()
+plt.savefig("qa_volume_accuracy_with_line.png", dpi=300, bbox_inches='tight')
+plt.savefig("qa_volume_accuracy_with_line.pdf", bbox_inches='tight')
+plt.show()
