@@ -61,4 +61,3 @@ plt.savefig("qa_accuracy_chart_research_bold_values.pdf", bbox_inches='tight')  
 
 # Show chart
 plt.show()
-
