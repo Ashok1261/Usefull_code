@@ -1,61 +1,66 @@
 import matplotlib.pyplot as plt
+import numpy as np
 
 # Data
-qa_labels = ["Original Q&A", "Consolidated Q&A\nPre-CoT Filter", "Consolidated Q&A\nPost-CoT Filter"]
-qa_volumes = [80_000, 200_000, 112_000]
-accuracy = [79, 84, 91]
+volumes = ['40K', '52K', '80K + 22K']
+factual = [22, 22, 22]
+conceptual = [18, 18, 18]
+procedural = [0, 12, 12]
+reasoning = [0, 0, 14]
+inferential = [0, 0, 14]
+accuracy = [48, 70, 79]
 
-# Scale volume data to percentage for plotting
-scaled_volumes = [v / max(qa_volumes) * 100 for v in qa_volumes]
+# Stack the question type data
+data = np.array([factual, conceptual, procedural, reasoning, inferential])
+x = np.arange(len(volumes))
 
-# Bar colors
-colors = ['#0074D9', '#B10DC9', '#2ECC40']  # Blue, Magenta, Green
+# Plot setup
+fig, ax1 = plt.subplots(figsize=(10, 6))
 
-# Create the figure and axis
-fig, ax = plt.subplots(figsize=(10, 6))
+# Colors
+colors = ['#1f77b4', '#e84393', '#2ca02c', '#d62728', '#9467bd']
+labels = ['Factual', 'Conceptual', 'Procedural', 'Reasoning', 'Inferential']
 
-# Plot bars
-bars = ax.bar(range(len(qa_labels)), scaled_volumes, color=colors)
+# Stacked bar chart
+bottom = np.zeros(len(volumes))
+for i in range(len(data)):
+    bars = ax1.bar(x, data[i], bottom=bottom, color=colors[i], label=labels[i])
+    for j, bar in enumerate(bars):
+        if data[i][j] > 0:
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                bottom[j] + data[i][j] / 2,
+                f'{data[i][j]}K',
+                ha='center',
+                va='center',
+                fontsize=10,
+                fontweight='bold',
+                color='white'
+            )
+    bottom += data[i]
 
-# Add volume values inside bars
-for bar, volume in zip(bars, qa_volumes):
-    ax.text(
-        bar.get_x() + bar.get_width() / 2,
-        bar.get_height() / 2,
-        f"{int(volume/1000)}K",
-        ha='center',
-        va='center',
-        color='white',
-        fontsize=12,
-        fontweight='bold'
-    )
-
-# Plot accuracy line
-ax.plot(range(len(qa_labels)), accuracy, color='black', marker='o', linewidth=2)
+# Accuracy line plot
+ax1.plot(x, accuracy, color='black', marker='o', linewidth=2, label='Accuracy (%)')
 for i, acc in enumerate(accuracy):
-    ax.text(i, acc + 2, f"{acc}%", ha='center', color='black', fontsize=12, fontweight='bold')
+    ax1.text(x[i], acc + 2, f'{acc}%', ha='center', fontsize=11, fontweight='bold', color='black')
 
-# Set axis labels and title
-ax.set_xticks(range(len(qa_labels)))
-ax.set_xticklabels(qa_labels, fontsize=12, fontweight='bold')
-ax.set_ylabel("QA Volume (Scaled %)", fontsize=14, fontweight='bold')
-ax.set_xlabel("Data Curation Strategies", fontsize=14, fontweight='bold')
-ax.set_title("Data Volume Vs Accuracy across different Curation Strategies", fontsize=16, fontweight='bold')
+# Axis formatting
+ax1.set_xticks(x)
+ax1.set_xticklabels(volumes, fontsize=12, fontweight='bold')
+ax1.set_ylabel("Accuracy (%)", fontsize=13, fontweight='bold')
+ax1.set_xlabel("Data Volume", fontsize=13, fontweight='bold')
+ax1.set_ylim(0, 110)
+ax1.tick_params(axis='y', labelsize=12, labelcolor='black')
+ax1.set_title("Question Distribution and Accuracy by Data Volume", fontsize=15, fontweight='bold')
+ax1.grid(False)
 
-# Make tick values bold
-ax.tick_params(axis='y', labelsize=12)
-for label in ax.get_yticklabels():
-    label.set_fontweight('bold')
-for label in ax.get_xticklabels():
-    label.set_fontweight('bold')
+# Custom legend
+custom_labels = labels + ['Accuracy']
+custom_colors = colors + ['black']
+custom_handles = [plt.Line2D([0], [0], color=color, lw=10) for color in custom_colors]
+plt.legend(custom_handles, custom_labels, loc='lower center', bbox_to_anchor=(0.5, -0.25), ncol=6, fontsize=10, frameon=False)
 
-# Clean look: remove grid and borders
-ax.grid(False)
-ax.spines['top'].set_visible(False)
-ax.spines['right'].set_visible(False)
-
-# Save the chart
+# Save the figure
 plt.tight_layout()
-plt.savefig("qa_volume_accuracy_clean_bold_ticks.png", dpi=300)
-plt.savefig("qa_volume_accuracy_clean_bold_ticks.pdf")
+plt.savefig("/mnt/data/final_question_accuracy_distribution.png", dpi=300, bbox_inches='tight')
 plt.show()
