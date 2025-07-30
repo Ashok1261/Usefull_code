@@ -73,4 +73,3 @@ plt.tight_layout()
 plt.savefig("qa_volume_accuracy_inside_bar_label.png", dpi=300, bbox_inches='tight')
 plt.savefig("qa_volume_accuracy_inside_bar_label.pdf", bbox_inches='tight')
 plt.show()
-
