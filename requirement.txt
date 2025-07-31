@@ -1,3 +1,21 @@
+import numpy as np
+
+if isinstance(result.output, pd.DataFrame):
+    # Convert NaN to None
+    df_serializable = result.output.where(pd.notnull(result.output), None)
+
+    # Convert NumPy types to Python native types
+    df_serializable = df_serializable.applymap(
+        lambda x: x.item() if isinstance(x, (np.integer, np.floating, np.bool_)) else x
+    )
+
+    output_result = df_serializable.to_dict(orient="records")
+else:
+    output_result = result.output
+
+
+
+
 if isinstance(result.output, pd.DataFrame):
     # Convert all non-serializable types like int64, float64 to native Python types
     df_serializable = result.output.astype(object)
