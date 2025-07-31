@@ -1,20 +1,6 @@
-import numpy as np
-import pandas as pd
-
-def make_json_serializable(obj):
-    """Recursively convert all NumPy objects to native Python types."""
-    if isinstance(obj, dict):
-        return {k: make_json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [make_json_serializable(item) for item in obj]
-    elif isinstance(obj, (np.integer, np.int64, np.int32)):
-        return int(obj)
-    elif isinstance(obj, (np.floating, np.float64, np.float32)):
-        return float(obj)
-    elif isinstance(obj, (np.bool_, bool)):
-        return bool(obj)
-    elif pd.isna(obj):
-        return None
-    else:
-        return obj
-
+output_path = (
+    flat_inputs.get("dynamic_evalRunTimeParams_output_path") or
+    flat_inputs.get("dynamic_blob_path") or
+    flat_inputs.get("dynamic_evalRunTimeParams_blob_path") or
+    ""
+)
