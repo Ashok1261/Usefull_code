@@ -1,38 +1,30 @@
 import pandas as pd
 import numpy as np
+import json
 
 def convert_to_serializable(val):
-    if isinstance(val, (np.integer, np.int64, np.int32)):
+    """Convert any non-serializable NumPy types or NaNs."""
+    if pd.isna(val):
+        return None
+    elif isinstance(val, (np.integer, np.int64, np.int32)):
         return int(val)
     elif isinstance(val, (np.floating, np.float64, np.float32)):
         return float(val)
     elif isinstance(val, (np.bool_, bool)):
         return bool(val)
-    elif pd.isna(val):
-        return None
     else:
         return val
 
-def process_promptflow_task(task):
-    ...
-    if isinstance(result.output, pd.DataFrame):
-        df_serializable = result.output.where(pd.notnull(result.output), None)
 
-        # Convert each cell value to JSON serializable
-        output_result = df_serializable.applymap(convert_to_serializable).to_dict(orient="records")
-    else:
-        output_result = result.output
+if isinstance(result.output, pd.DataFrame):
+    df_clean = result.output.where(pd.notnull(result.output), None)
+    df_serializable = df_clean.applymap(convert_to_serializable)
+    output_result = df_serializable.to_dict(orient="records")
+else:
+    output_result = result.output
 
-    # Sanity check to raise if not serializable
-    import json
-    try:
-        json.dumps(output_result)
-    except TypeError as e:
-        raise ValueError(f"Final output is not JSON serializable: {e}")
-
-    task_record.output = {
-        "results": {"response": output_result},
-        "outputDirectory": output_path,
-    }
-    ...
-
+# 🔒 Final check to ensure JSON serializability
+try:
+    json.dumps(output_result)
+except TypeError as e:
+    raise ValueError(f"Final output is not JSON serializable: {e}")
