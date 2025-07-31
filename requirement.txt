@@ -1,15 +1,12 @@
-
 import numpy as np
 import pandas as pd
 
 def process_promptflow_task(task):
     ...
     if isinstance(result.output, pd.DataFrame):
-        # Step 1: Replace NaNs with None
         df_serializable = result.output.where(pd.notnull(result.output), None)
 
-        # Step 2: Convert NumPy/scalar types to Python-native types
-        def convert_to_serializable(val):
+        def convert_value(val):
             if isinstance(val, (np.integer, np.int64, np.int32)):
                 return int(val)
             elif isinstance(val, (np.floating, np.float64, np.float32)):
@@ -18,50 +15,25 @@ def process_promptflow_task(task):
                 return bool(val)
             elif pd.isna(val):
                 return None
-            return val
+            else:
+                return str(val) if isinstance(val, (dict, list, set)) else val
 
-        df_serializable = df_serializable.applymap(convert_to_serializable)
+        df_serializable = df_serializable.applymap(convert_value)
 
-        # Step 3: Convert DataFrame to list of dicts (records)
         output_result = df_serializable.to_dict(orient="records")
-
     else:
         output_result = result.output
 
-    # Step 4: Save to output
+    # Ensure final output is JSON serializable (double check!)
+    import json
+    try:
+        json.dumps(output_result)
+    except TypeError as e:
+        raise ValueError(f"Final output is not JSON serializable: {e}")
+
+    # Save in DB
     task_record.output = {
-        "results": output_result,
+        "results": {"response": output_result},
         "outputDirectory": output_path,
     }
     ...
-
-
-
-
-
-
-import numpy as np
-
-if isinstance(result.output, pd.DataFrame):
-    # Convert NaN to None
-    df_serializable = result.output.where(pd.notnull(result.output), None)
-
-    # Convert NumPy types to Python native types
-    df_serializable = df_serializable.applymap(
-        lambda x: x.item() if isinstance(x, (np.integer, np.floating, np.bool_)) else x
-    )
-
-    output_result = df_serializable.to_dict(orient="records")
-else:
-    output_result = result.output
-
-
-
-
-if isinstance(result.output, pd.DataFrame):
-    # Convert all non-serializable types like int64, float64 to native Python types
-    df_serializable = result.output.astype(object)
-    df_serializable = df_serializable.where(pd.notnull(df_serializable), None)  # Replace NaN with None
-    output_result = df_serializable.to_dict(orient="records")
-else:
-    output_result = result.output
