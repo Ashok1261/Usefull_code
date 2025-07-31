@@ -1,49 +1,7 @@
 if isinstance(result.output, pd.DataFrame):
-    output_result = result.output.to_dict(orient="records")
+    # Convert all non-serializable types like int64, float64 to native Python types
+    df_serializable = result.output.astype(object)
+    df_serializable = df_serializable.where(pd.notnull(df_serializable), None)  # Replace NaN with None
+    output_result = df_serializable.to_dict(orient="records")
 else:
     output_result = result.output
-
-task_record.output = {
-    "results": output_result,
-    "outputDirectory": output_path,
-}
-
-import json
-
-if task_record:
-    task_record.status = TaskStatusEnum.SUCCESS
-    results_output = result.output
-
-    # Safely convert if it's a DataFrame
-    if isinstance(results_output, pd.DataFrame):
-        results_output = results_output.to_dict(orient='records')
-
-    # Ensure the final structure is JSON-serializable
-    output_dict = {
-        "outputDirectory": output_path,
-        "results": results_output
-    }
-
-    try:
-        # Validate before assigning to task_record
-        json.dumps(output_dict)  # ❗ will raise if not serializable
-        task_record.output = output_dict
-    except TypeError as err:
-        print("Serialization failed:", err)
-        # Optional: Dump as string if still not serializable
-        task_record.output = {"outputDirectory": output_path, "results": str(results_output)}
-
-    task_record.modified_ts = get_current_datetime()
-
-
-
-
-
-
-import pandas as pd
-
-# Convert DataFrame to list of dicts (JSON serializable)
-if isinstance(result.output, pd.DataFrame):
-    result_output_serialized = result.output.to_dict(orient='records')
-else:
-    result_output_serialized = result.output
