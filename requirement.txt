@@ -1,1 +1,11 @@
-output_path = storage_result if isinstance(storage_result, str) else storage_result.get("storagePath", "")
+# Handle both str and dict types safely
+if isinstance(storage_result, dict):
+    output_path = storage_result.get("storagePath", "")
+elif isinstance(storage_result, str):
+    output_path = storage_result
+else:
+    output_path = ""
+
+
+
+utput_path = storage_result if isinstance(storage_result, str) else storage_result.get("storagePath", "")
