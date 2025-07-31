@@ -1,3 +1,45 @@
+
+import numpy as np
+import pandas as pd
+
+def process_promptflow_task(task):
+    ...
+    if isinstance(result.output, pd.DataFrame):
+        # Step 1: Replace NaNs with None
+        df_serializable = result.output.where(pd.notnull(result.output), None)
+
+        # Step 2: Convert NumPy/scalar types to Python-native types
+        def convert_to_serializable(val):
+            if isinstance(val, (np.integer, np.int64, np.int32)):
+                return int(val)
+            elif isinstance(val, (np.floating, np.float64, np.float32)):
+                return float(val)
+            elif isinstance(val, (np.bool_, bool)):
+                return bool(val)
+            elif pd.isna(val):
+                return None
+            return val
+
+        df_serializable = df_serializable.applymap(convert_to_serializable)
+
+        # Step 3: Convert DataFrame to list of dicts (records)
+        output_result = df_serializable.to_dict(orient="records")
+
+    else:
+        output_result = result.output
+
+    # Step 4: Save to output
+    task_record.output = {
+        "results": output_result,
+        "outputDirectory": output_path,
+    }
+    ...
+
+
+
+
+
+
 import numpy as np
 
 if isinstance(result.output, pd.DataFrame):
