@@ -1,1 +1,1 @@
-
+output_path = storage_result if isinstance(storage_result, str) else storage_result.get("storagePath", "")
