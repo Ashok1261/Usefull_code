@@ -1,40 +1,7 @@
-
 import pandas as pd
-from vllm import LLM, SamplingParams
 
-# 1. Load CSV
-csv_path = "questions.csv"
-df = pd.read_csv(csv_path)
-
-# 🔧 Remove any old finetuned response column
-df = df.drop(columns=[col for col in df.columns if "Finetuned_Response" in col], errors='ignore')
-
-# 2. Build prompts
-prompts = [
-    f"You are an expert in {row['Question Type']}.\n"
-    f"Question: {row['Question']}\n"
-    f"Reference Answer: {row['Answer']}\n"
-    f"Generate a finetuned answer for the question:"
-    for _, row in df.iterrows()
-]
-
-# 3. Sampling Params
-sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=150)
-
-# 4. Initialize Model
-try:
-    llm = LLM(model="/Volumes/dev2_catalog_01/default/txt-wtf-pe/data/Facebook_opt_125m/")
-except Exception as e:
-    print(f"Error initializing LLM: {e}")
-    exit()
-
-# 5. Generate
-print("Generating Finetuned Responses...")
-outputs = llm.generate(prompts, sampling_params)
-print("Done.")
-
-# 6. Append output
-df["Finetuned_Response"] = [o.outputs[0].text.strip() for o in outputs]
-
-# 7. Save
-df.to_csv("questions_with_finetuned_response.csv", index=False)
+# Convert DataFrame to list of dicts (JSON serializable)
+if isinstance(result.output, pd.DataFrame):
+    result_output_serialized = result.output.to_dict(orient='records')
+else:
+    result_output_serialized = result.output
