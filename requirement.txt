@@ -1,4 +1,12 @@
+if isinstance(result.output, pd.DataFrame):
+    output_result = result.output.to_dict(orient="records")
+else:
+    output_result = result.output
 
+task_record.output = {
+    "results": output_result,
+    "outputDirectory": output_path,
+}
 
 import json
 
