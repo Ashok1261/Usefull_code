@@ -1,30 +1,40 @@
-import matplotlib.pyplot as plt
 
-# Accuracy data for both models
-categories = ["Overall", "Factual", "Conceptual", "Procedural", "Reasoning", "Inferential"]
-mistral_7b = [86.9, 91.0, 84.4, 85.7, 85.1, 88.4]
-llama_8b = [89.8, 97.8, 86.4, 89.8, 87.0, 88.6]
+import pandas as pd
+from vllm import LLM, SamplingParams
 
-# Create the plot
-plt.figure(figsize=(10, 6))
-plt.plot(categories, mistral_7b, marker='o', color='red', label='Mistral 7B')
-plt.plot(categories, llama_8b, marker='o', color='green', label='Llama 8B')
+# 1. Load CSV
+csv_path = "questions.csv"
+df = pd.read_csv(csv_path)
 
-# Add data labels on each point
-for i, (m_val, l_val) in enumerate(zip(mistral_7b, llama_8b)):
-    plt.text(i, m_val + 0.5, f'{m_val}', color='red', ha='center', fontweight='bold')
-    plt.text(i, l_val + 0.5, f'{l_val}', color='green', ha='center', fontweight='bold')
+# 🔧 Remove any old finetuned response column
+df = df.drop(columns=[col for col in df.columns if "Finetuned_Response" in col], errors='ignore')
 
-# Add title, labels, and grid
-plt.title("Consolidated Q&A is mix of Original Q&A and Diverse Q&A (post COT filter)", fontweight='bold')
-plt.ylabel("Accuracy", fontweight='bold')
-plt.ylim(75, 100)
-plt.grid(True, linestyle='--', alpha=0.5)
-plt.legend()
-plt.tight_layout()
+# 2. Build prompts
+prompts = [
+    f"You are an expert in {row['Question Type']}.\n"
+    f"Question: {row['Question']}\n"
+    f"Reference Answer: {row['Answer']}\n"
+    f"Generate a finetuned answer for the question:"
+    for _, row in df.iterrows()
+]
 
-# Save the plot to file
-plt.savefig("qa_accuracy_comparison.png")
+# 3. Sampling Params
+sampling_params = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=150)
 
-# Optional: Show the plot (for notebooks or local viewing)
-plt.show()
+# 4. Initialize Model
+try:
+    llm = LLM(model="/Volumes/dev2_catalog_01/default/txt-wtf-pe/data/Facebook_opt_125m/")
+except Exception as e:
+    print(f"Error initializing LLM: {e}")
+    exit()
+
+# 5. Generate
+print("Generating Finetuned Responses...")
+outputs = llm.generate(prompts, sampling_params)
+print("Done.")
+
+# 6. Append output
+df["Finetuned_Response"] = [o.outputs[0].text.strip() for o in outputs]
+
+# 7. Save
+df.to_csv("questions_with_finetuned_response.csv", index=False)
