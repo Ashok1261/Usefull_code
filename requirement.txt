@@ -1,3 +1,19 @@
+        if isinstance(response, dict) and "storagePath" in response:
+            storage_obj = response["storagePath"]
+            # ✅ Fix: extract message string from the StorageObj
+            if hasattr(storage_obj, "message"):
+                return storage_obj.message  # Return only string path
+            else:
+                return str(storage_obj)  # Fallback
+
+        return "Unknown blob path"
+
+
+
+
+
+
+
 import pandas as pd
 import io
 from utils.logging_config import logger  # Adjust as per your project structure
