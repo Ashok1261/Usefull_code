@@ -1,11 +1,26 @@
+from ssrai_service import DataCurationService, BlobLocation
+import pandas as pd
+import io
+import logging
+from typing import Union
 
-def save_evaluation_results_to_blob(df, filename: str = "evaluation_results.csv") -> str:
-    """Save evaluation results to blob storage and return a JSON-serializable string path."""
+logger = logging.getLogger(__name__)
+
+
+def save_evaluation_results_to_blob(
+    df: pd.DataFrame, 
+    filename: str = "evaluation_results.csv"
+) -> str:
+    """
+    Saves the DataFrame to blob storage and returns only the path (string),
+    avoiding non-serializable objects like StorageObj.
+    """
     try:
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
 
-        storage_obj = DataCurationService().upload_file_blob(
+        # Upload using existing function
+        response = DataCurationService().upload_file_blob(
             csv_buffer.getvalue(),
             filename=filename,
             blobFilePath=BlobLocation(
@@ -14,38 +29,29 @@ def save_evaluation_results_to_blob(df, filename: str = "evaluation_results.csv"
             )
         )
 
-        # Extract a JSON-serializable string from StorageObj
-        if hasattr(storage_obj, 'message'):
-            print("Upload to blob successful.")
-            return storage_obj.message  # returning message as string (e.g., "File successfully saved to: pvt-markets")
-        elif isinstance(storage_obj, dict) and "storagePath" in storage_obj:
-            return storage_obj["storagePath"]
+        # Ensure we return only the string path (not the whole object)
+        if isinstance(response, dict) and "storagePath" in response:
+            return response["storagePath"]
+
+        elif hasattr(response, "message") and isinstance(response.message, str):
+            return response.message  # Fallback
+
         else:
-            return ""
+            return filename  # Fallback to filename if nothing found
 
     except Exception as e:
         logger.error(f"Error saving evaluation results to blob: {e}", exc_info=True)
         return ""
 
-def evaluation_runtime_config_path(project_id: str, task_id: str, fts_job_strategy_id: str):
-    return f"FTS/Project/{project_id}/Task/{task_id}/FT-JobStrategy/{fts_job_strategy_id}/evaluation_results.csv"
 
+# In your compute_scores_for_df or wherever you call this:
+# --------------------------------------
+# output_path = save_evaluation_results_to_blob(df_acc, filename=blob_path)
+# return {
+#     "outputDirectory": output_path,
+#     "results": df_acc.to_dict(orient="records")
+# }
+# --------------------------------------
 
-def compute_scores_for_df(df_acc, project_id, task_id, strategy_id):
-    from score_utils import get_mean, question_typewise_accur  # assuming they exist
-
-    cols = ["business_comparison_score", "accuracy_score", "completeness_score"]
-    df_acc = get_mean(df_acc, cols)
-    df_acc = question_typewise_accur(df_acc)
-
-    print(f"The final results: {df_acc}")
-
-    blob_path = evaluation_runtime_config_path(project_id, task_id, strategy_id)
-    output_path = save_evaluation_results_to_blob(df_acc, filename=blob_path)
-
-    print("The output path is", output_path)
-
-    return {
-        "outputDirectory": output_path,
-        "results": df_acc.to_dict(orient='records')
-    }
+# Do NOT return any object like StorageObj or custom wrapper object in the final output
+# because json.dumps() will raise TypeError unless it's a dict, list, str, int, float, or None.
