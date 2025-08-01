@@ -1,9 +1,41 @@
+import io
+import pandas as pd
+from methods.data_curation_service import DataCurationService
+from models.blob_location import BlobLocation
 
-storage_obj = save_evaluation_results_to_blob(df_acc, filename=blob_path)
+def save_evaluation_results_to_blob(questions, filename="evaluation_results.csv") -> str:
+    """Save valid questions and answers to blob and return the blob path as string."""
+    try:
+        df = pd.DataFrame(questions)
 
-# Extract only string path to avoid JSON serialization error
-output_path = ""
-if isinstance(storage_obj, StorageObj):
-    output_path = f"{storage_obj.message}"  # or manually extract string path if available
-elif isinstance(storage_obj, dict) and "storagePath" in storage_obj:
-    output_path = storage_obj["storagePath"]
+        # Ensure required columns exist
+        required_columns = ["Question Type", "Question", "Answer"]
+        for col in required_columns:
+            if col not in df.columns:
+                df[col] = ""
+
+        # Optional formatting
+        for col in ["Question", "Answer"]:
+            df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce").dt.strftime("%m-%d-%Y").fillna(df[col])
+
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+
+        # Call existing blob upload
+        storage_result = DataCurationService().upload_file_blob(
+            csv_buffer.getvalue(),
+            filename,
+            BlobLocation(container_name="pvt-markets", absolute_path=filename)
+        )
+
+        # Extract string path safely
+        if isinstance(storage_result, dict) and "storagePath" in storage_result:
+            return storage_result["storagePath"]
+        elif hasattr(storage_result, 'message'):  # For StorageObj
+            return storage_result.message
+        else:
+            return ""
+    except Exception as e:
+        print(f"Error saving to blob: {e}")
+        return ""
+
