@@ -1,27 +1,42 @@
-def save_evaluation_results_to_blob(questions, filename="evaluation_results.csv") -> str:
-    """
-    Save valid questions and answers to blob and return only the actual string path.
-    """
+
+blob_path = evaluation_runtime_config_path(strategy_id)
+
+# Get StorageObj or response dict
+storage_result = save_evaluation_results_to_blob(df_acc, filename=blob_path)
+
+# Extract string path from the object
+if isinstance(storage_result, dict) and "storagePath" in storage_result:
+    output_path = storage_result["storagePath"]
+else:
+    output_path = ""
+
+print("The output path is ", output_path)
+
+return {
+    "outputDirectory": output_path,
+    "results": df_acc.to_dict(orient='records')
+}
+
+
+
+
+def save_evaluation_results_to_blob(questions, filename="evaluation_results.csv") -> dict:
     try:
         df = pd.DataFrame(questions)
 
-        # Ensure required columns exist
         required_columns = ["Question Type", "Question", "Answer"]
         for col in required_columns:
             if col not in df.columns:
                 df[col] = ""
 
-        # Format datetime columns safely
         for col in ["Question", "Answer"]:
             df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce") \
                         .dt.strftime("%m-%d-%Y").fillna(df[col])
 
-        # Save to CSV in memory
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
 
-        # Upload to blob
-        storage_response = DataCurationService().upload_file_blob(
+        return DataCurationService().upload_file_blob(
             data=csv_buffer.getvalue(),
             filename=filename,
             blobFilePath=BlobLocation(
@@ -30,57 +45,8 @@ def save_evaluation_results_to_blob(questions, filename="evaluation_results.csv"
             )
         )
 
-        # Extract path from response dictionary
-        if isinstance(storage_response, dict) and "storagePath" in storage_response:
-            return storage_response["storagePath"]
-        else:
-            return ""
-
     except Exception as e:
         logger.error(f"Error saving questions to blob: {e}", exc_info=True)
-        return ""
+        return {}
 
 
-
-
-
-
-
-def save_questions_to_blob(questions, filename):
-    try:
-        df = pd.DataFrame(questions)
-
-        required_columns = ["Question Type", "Question", "Answer"]
-        for col in required_columns:
-            if col not in df.columns:
-                df[col] = ""
-
-        # Optional date formatting (skip if not needed)
-        for col in ["Question", "Answer"]:
-            df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce") \
-                .dt.strftime("%m-%d-%Y").fillna(df[col])
-
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-
-        # Extract directory and filename
-        folder_path = os.path.dirname(filename)
-        file_name = os.path.basename(filename)
-
-        # ✅ Upload using correct structure
-        result = DataCurationService().upload_file_blob(
-            data=csv_buffer.getvalue(),
-            filename=file_name,
-            blobFilePath=BlobLocation(
-                container_name="pvt-markets",
-                absolute_path=folder_path
-            )
-        )
-
-        print("✅ Upload to blob successful.")
-        return result.get("storagePath")  # ✅ return actual saved path
-
-    except Exception as e:
-        logger.error(f"Error saving questions to blob: {e}", exc_info=True)
-        print(f"❌ Error saving to blob: {e}")
-        return None
