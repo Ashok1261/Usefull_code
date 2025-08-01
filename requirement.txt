@@ -1,33 +1,26 @@
 
-def save_evaluation_results_to_blob(questions, filename="evaluation_results.csv"):
-    """Save valid questions and answers to blob and return the StorageObj"""
-    try:
-        df = pd.DataFrame(questions)
+# Correct way to handle StorageObj and return proper string output path
+def compute_scores_for_df(...):
+    ...
+    # Save results to blob
+    storage_obj = save_evaluation_results_to_blob(df_acc, filename=blob_path)
 
-        required_columns = ["Question Type", "Question", "Answer"]
-        for col in required_columns:
-            if col not in df.columns:
-                df[col] = ""
+    # Extract only string path to avoid JSON serialization error
+    output_path = ""
+    if isinstance(storage_obj, StorageObj):
+        # Option 1: If you want just the blob path (preferred)
+        output_path = storage_obj.storagePath if hasattr(storage_obj, 'storagePath') else storage_obj.message
+        
+        # Option 2: If your team expects a string in 'message' (less precise)
+        # output_path = storage_obj.message  # Make sure to spell it correctly
+    elif isinstance(storage_obj, dict) and "storagePath" in storage_obj:
+        output_path = storage_obj["storagePath"]
+    else:
+        output_path = str(storage_obj)  # fallback for unexpected object types
 
-        for col in ["Question", "Answer"]:
-            df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce").dt.strftime("%m-%d-%Y").fillna(df[col])
+    print("The output path is", output_path)
 
-        csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
-
-        # Upload to blob
-        storage_obj = DataCurationService().upload_file_blob(
-            csv_buffer.getvalue(),
-            filename=filename,
-            blobFilePath=BlobLocation(
-                container_name="pvt-markets",
-                absolute_path=filename
-            )
-        )
-
-        print("Upload to blob successful.")
-        return storage_obj  # ✅ returning StorageObj
-
-    except Exception as e:
-        logger.error(f"Error saving questions to blob: {e}", exc_info=True)
-        return None
+    return {
+        "outputDirectory": output_path,
+        "results": df_acc.to_dict(orient="records")
+    }
