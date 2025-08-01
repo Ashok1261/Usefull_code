@@ -1,55 +1,48 @@
-        if isinstance(response, dict) and "storagePath" in response:
-            storage_obj = response["storagePath"]
-            # ✅ Fix: extract message string from the StorageObj
-            if hasattr(storage_obj, "message"):
-                return storage_obj.message  # Return only string path
-            else:
-                return str(storage_obj)  # Fallback
-
-        return "Unknown blob path"
-
-
-
-
-
-
 
 import pandas as pd
 import io
-from utils.logging_config import logger  # Adjust as per your project structure
-from services.data_curation_service import DataCurationService
-from models.blob_location import BlobLocation
-from models.enums import StorageObjectType
+from services.data_curation_service import DataCurationService  # Adjust this import
+from services.blob_location import BlobLocation  # Adjust this import
+from utils.enums import StorageObjectType  # Adjust this import
 
-def save_questions_to_blob(questions, filename: str) -> str:
-    """Save DataFrame to blob and return string path."""
+def save_questions_to_blob(df: pd.DataFrame, filename: str) -> str:
+    """
+    Save DataFrame to Azure Blob and return the saved file path (as string).
+    """
+
     try:
-        df = pd.DataFrame(questions)
+        # Required columns check
         required_columns = ["Question Type", "Question", "Answer"]
         for col in required_columns:
             if col not in df.columns:
                 df[col] = ""
 
+        # Handle date formatting (only for Question/Answer if they're actually dates)
         for col in ["Question", "Answer"]:
             df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce").dt.strftime("%m-%d-%Y").fillna(df[col])
 
+        # Convert to CSV buffer
         csv_buffer = io.StringIO()
         df.to_csv(csv_buffer, index=False)
 
+        # Upload to Blob
         blob_path = BlobLocation(container_name="pvt-markets", absolute_path=filename)
-
         response = DataCurationService().upload_file_blob(
             data=csv_buffer.getvalue(),
             filename="evaluation_results.csv",
             blobFilePath=blob_path,
-            object_type=StorageObjectType.binary.value
         )
 
+        # ✅ Extract and return string message
         if isinstance(response, dict) and "storagePath" in response:
-            return str(response["storagePath"])  # ✅ JSON-serializable string
-
+            storage_obj = response["storagePath"]
+            if hasattr(storage_obj, "message"):
+                return storage_obj.message  # Safe for JSON
+            else:
+                return str(storage_obj)
         return "Unknown blob path"
-    except Exception as e:
-        logger.error(f"Error saving questions to blob: {e}", exc_info=True)
-        return "Blob save error"
 
+    except Exception as e:
+        import logging
+        logging.error(f"Error saving questions to blob: {e}", exc_info=True)
+        return "Error"
